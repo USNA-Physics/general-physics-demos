@@ -46,10 +46,10 @@ const GREEN = '#7FB77E';
 const MUTED = '#8B8C8E';
 
 export default function FreeFall({ mode = 'default' }) {
-  // Projectile (D06) is 2D motion and now lives under Chapter 3 as its own demo
-  // (ch03-motion-2d/Projectile), which re-exports ProjectileMode below. Free Fall
-  // keeps the 1D views: default (L2) and drag (D12, L12).
-  if (mode === 'drag') return <DragMode />;
+  // Free Fall is the 1D constant-acceleration explorer (L2). Its former extensions
+  // now live in their proper chapters as their own demos, reusing this file's code:
+  //   projectile (D06) → ch03-motion-2d/Projectile   (2D motion)
+  //   drag (D12)       → ch05-applications/Drag       (applications of Newton's laws)
   return mode === 'default' ? <FreeFallExplorer /> : <DemoStub mode={mode} />;
 }
 
@@ -942,7 +942,7 @@ const OBJECT_PRESETS = {
 
 const DRAG_DEFAULTS = { h0: 100, mass: 0.145, coeff: 0.47, area: 0.0042, model: 'quadratic', preset: 'baseball' };
 
-function DragMode() {
+export function DragMode() {
   const [h0, setH0] = useState(DRAG_DEFAULTS.h0);
   const [mass, setMass] = useState(DRAG_DEFAULTS.mass);
   const [coeff, setCoeff] = useState(DRAG_DEFAULTS.coeff);

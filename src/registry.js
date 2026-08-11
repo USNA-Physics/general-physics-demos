@@ -45,10 +45,6 @@ const courses = [
             description: 'A ball drops from adjustable height; position and velocity trace against the constant-acceleration predictions. Hosts projectile (D06) and drag (D12) as modes.',
             moment: 'Predict the fall time from the height, then watch x(t) trace the parabola your equation predicted.',
             status: 'built',
-            modes: [
-              { slug: 'default', label: 'Free fall (L2)' },
-              { slug: 'drag', label: 'Drag · D12 (L12)' },
-            ],
             component: lazy(() => import('./courses/sp211/ch02-motion-1d/FreeFall')),
           },
           {
@@ -154,6 +150,16 @@ const courses = [
             due: 'Aug 27',
             status: 'built',
             component: lazy(() => import('./courses/sp211/ch05-applications/FrictionIncline')),
+          },
+          {
+            slug: 'drag',
+            dLabel: 'D12',
+            title: 'Drag & Terminal Velocity',
+            description: 'A falling object with linear or quadratic drag beside a vacuum twin. The v(t) plot approaches the terminal-velocity asymptote it never crosses; object presets (feather → bowling ball → skydiver) make heavy-vs-light honest via ballistic coefficient.',
+            moment: 'Two objects separate in air but land together in vacuum — the difference is drag, not weight.',
+            due: 'Aug 28',
+            status: 'built',
+            component: lazy(() => import('./courses/sp211/ch05-applications/Drag')),
           },
           {
             slug: 'cm',
@@ -430,7 +436,7 @@ const courses = [
       { n: 9, topic: 'Contact forces, FBDs', chapter: 'ch04-newton', experiment: 'fbd', mode: 'fbd', dLabel: 'D09' },
       { n: 10, topic: 'Newton\'s 3rd', chapter: 'ch04-newton', experiment: 'fbd', mode: 'pairs', dLabel: 'D09' },
       { n: 11, topic: 'Friction', chapter: 'ch05-applications', experiment: 'friction', mode: 'default', dLabel: 'D11' },
-      { n: 12, topic: 'Drag', chapter: 'ch02-motion-1d', experiment: 'free-fall', mode: 'drag', dLabel: 'D12' },
+      { n: 12, topic: 'Drag', chapter: 'ch05-applications', experiment: 'drag', mode: 'default', dLabel: 'D12' },
       { n: 13, topic: 'Curved paths, UCM dynamics', chapter: 'ch03-motion-2d', experiment: 'ucm', mode: 'banked', dLabel: 'D07' },
       { n: 14, topic: 'Center of mass', chapter: 'ch05-applications', experiment: 'cm', mode: 'default', dLabel: 'D14' },
       { n: 15, topic: 'Work, constant forces', chapter: 'ch06-work', experiment: 'work', mode: 'dot', dLabel: 'D15' },
