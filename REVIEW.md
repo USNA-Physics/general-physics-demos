@@ -12,7 +12,7 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | Lesson(s) | Demo | Route · mode | Status |
 |---|---|---|---|
 | L1, L3, L8 | D01 · 1D Motion Grapher | `ch02-motion-1d/grapher` · default/area/force | ⬜ |
-| L2 | D02 · Free Fall Explorer | `ch02-motion-1d/free-fall` | 🔄 |
+| L2 | D02 · Free Fall Explorer | `ch02-motion-1d/free-fall` | ✅ |
 | L4 | D04 · 2D Vector Kinematics | `ch03-motion-2d/vectors` | ⬜ |
 | L5 | D05 · Relative Motion | `ch03-motion-2d/relative` | ⬜ |
 | L6 | D06 · Projectile (Free Fall mode) | `…/free-fall?mode=projectile` | ⬜ |
@@ -39,7 +39,7 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 
 ## Review log
 
-### D02 · Free Fall Explorer — L2 (Constant acceleration) · 🔄 in review
+### D02 · Free Fall Explorer — L2 (Constant acceleration) · ✅ solidified
 
 **Route:** `/#/sp211/ch02-motion-1d/free-fall`
 
@@ -52,8 +52,11 @@ a live plot of position y(t) (gold) and velocity v(t) (blue) vs time; readouts f
 and impact speed; InfoPanel with the two kinematic equations. Curves recompute on slider change
 (no animated dropping ball in the default mode).
 
-**Findings:** _(to fill during review)_
+**Changes (in progress):**
+- Split into **three stacked, time-synced panels** (y, v, a) sharing one time axis, each with its own y-axis (a is a constant −g line).
+- Added an **animated drop** on a vertical track beside the plots: a falling ball with a live velocity arrow, synced to a dotted time cursor and per-curve markers.
+- **Strobe snapshots**: fixed dots dropped at equal time intervals that appear as the ball passes them, so the growing gap per interval is visible (replaced the moving "spring"-like trail). Brightened for visibility.
+- Play/Drop + time scrub; live t / y / v / a readouts.
+- Dev-only: the password gate is skipped under `npm run dev` (still active on the deployed build).
 
-**Changes:** _(to fill)_
-
-**Verdict:** _pending sign-off_
+**Verdict:** ✅ Solidified.

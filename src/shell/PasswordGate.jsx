@@ -21,7 +21,14 @@ async function sha256hex(str) {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Hook-free wrapper: the gate only guards the deployed build. In local dev
+// (`npm run dev`) it's skipped so development isn't interrupted.
 export default function PasswordGate({ children }) {
+  if (import.meta.env.DEV) return children;
+  return <Gate>{children}</Gate>;
+}
+
+function Gate({ children }) {
   const [unlocked, setUnlocked] = useState(() => {
     try { return localStorage.getItem(UNLOCK_KEY) === '1'; } catch { return false; }
   });

@@ -57,79 +57,184 @@ export default function FreeFall({ mode = 'default' }) {
 function FreeFallExplorer() {
   const [y0, setY0] = useState(DEFAULTS.y0);
   const [v0, setV0] = useState(DEFAULTS.v0);
+  const [scrub, setScrub] = useState(0);       // current time on the drop (s)
+  const [playing, setPlaying] = useState(true);
 
-  const reset = () => { setY0(DEFAULTS.y0); setV0(DEFAULTS.v0); };
+  const reset = () => { setY0(DEFAULTS.y0); setV0(DEFAULTS.v0); setScrub(0); setPlaying(true); };
 
-  // Time to hit ground: y0 + v0*t - 0.5*g*t^2 = 0
+  // Flight time: y0 + v0 t - 1/2 g t^2 = 0 (positive root).
   const disc = v0 * v0 + 2 * G * y0;
-  const tGround = disc > 0 ? (v0 + Math.sqrt(disc)) / G : 0;
-  const tMax = tGround * 1.05;
+  const tGround = disc > 0 ? (v0 + Math.sqrt(disc)) / G : 0.1;
 
-  const nPts = 500;
-  const { tData, yData, vData } = useMemo(() => {
-    const ts = [], ys = [], vs = [];
-    for (let i = 0; i < nPts; i++) {
-      const t = (i / (nPts - 1)) * tMax;
-      const y = y0 + v0 * t - 0.5 * G * t * t;
-      ts.push(t);
-      ys.push(Math.max(0, y));
-      vs.push(v0 - G * t);
+  const N = 240;
+  const motion = useMemo(() => {
+    const t = [], y = [], v = [], a = [];
+    for (let i = 0; i < N; i++) {
+      const tt = (i / (N - 1)) * tGround;
+      t.push(tt);
+      y.push(Math.max(0, y0 + v0 * tt - 0.5 * G * tt * tt));
+      v.push(v0 - G * tt);
+      a.push(-G);
     }
-    return { tData: ts, yData: ys, vData: vs };
-  }, [y0, v0, tMax]);
+    return { t, y, v, a };
+  }, [y0, v0, tGround]);
 
-  const posTrace = {
-    x: tData, y: yData,
-    type: 'scatter', mode: 'lines',
-    line: { color: GOLD, width: 2.5 },
-    name: 'y(t)',
-  };
+  const apex = v0 > 0 ? y0 + (v0 * v0) / (2 * G) : y0;
+  const yMax = Math.max(1, apex * 1.05);
 
-  const velTrace = {
-    x: tData, y: vData,
-    type: 'scatter', mode: 'lines',
-    line: { color: BLUE, width: 2.5 },
-    name: 'v(t)',
-    yaxis: 'y2',
-  };
-
+  // Keep the scrub inside the (possibly shortened) flight window.
+  useEffect(() => { setScrub((s) => Math.min(s, tGround)); }, [tGround]);
+  const scrubT = Math.min(scrub, tGround);
+  const idx = Math.max(0, Math.min(N - 1, Math.round((scrubT / tGround) * (N - 1))));
+  const now = { t: motion.t[idx], y: motion.y[idx], v: motion.v[idx], a: motion.a[idx] };
   const vImpact = v0 - G * tGround;
+
+  // Play: sweep the whole drop over ~2.5 s of wall clock, then loop.
+  const playRef = useRef();
+  useEffect(() => {
+    if (!playing) return;
+    const step = tGround / 50;
+    playRef.current = setInterval(() => {
+      setScrub((s) => (s >= tGround ? 0 : Math.min(tGround, s + step)));
+    }, 50);
+    return () => clearInterval(playRef.current);
+  }, [playing, tGround]);
+
+  // ── the animated drop (own canvas + rAF, reads live values via a ref) ──
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
+  const st = useRef({ y0, v0, yMax, scrubT, tGround });
+  st.current = { y0, v0, yMax, scrubT, tGround };
+
+  useEffect(() => {
+    const canvas = canvasRef.current, wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    let ctx, W, H, raf;
+    const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
+    const draw = () => {
+      const { y0: yy, v0: vv, yMax: yM, scrubT: sT, tGround: tg } = st.current;
+      const padBottom = 22, ballX = W / 2;
+      const groundY = H - padBottom, topY = 16, span = groundY - topY;
+      const yToPx = (yv) => groundY - (yv / yM) * span;
+      ctx.clearRect(0, 0, W, H);
+      // ground
+      ctx.strokeStyle = '#2A3442'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(8, groundY); ctx.lineTo(W - 8, groundY); ctx.stroke();
+      // release height
+      ctx.strokeStyle = 'rgba(197,183,131,0.35)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(8, yToPx(yy)); ctx.lineTo(W - 8, yToPx(yy)); ctx.stroke();
+      ctx.setLineDash([]);
+      // apex line when thrown upward
+      if (vv > 0) {
+        const ap = yy + (vv * vv) / (2 * G);
+        ctx.strokeStyle = 'rgba(127,183,126,0.3)'; ctx.setLineDash([2, 4]);
+        ctx.beginPath(); ctx.moveTo(8, yToPx(ap)); ctx.lineTo(W - 8, yToPx(ap)); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // strobe snapshots at equal TIME intervals. Each is pinned at its fixed
+      // height y(t_k) and only appears once the ball has reached it, so the
+      // dots stay put and the gap between them grows each interval.
+      const nSnap = 12;
+      const dtk = tg / nSnap;
+      for (let k = 0; k <= nSnap; k++) {
+        const tk = k * dtk;
+        if (sT + 1e-6 < tk) continue; // not yet crossed
+        const yk = Math.max(0, yy + vv * tk - 0.5 * G * tk * tk);
+        ctx.fillStyle = 'rgba(232,228,219,0.7)';
+        ctx.beginPath(); ctx.arc(ballX, yToPx(yk), 5, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = 'rgba(120,124,130,0.55)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(ballX, yToPx(yk), 5, 0, 2 * Math.PI); ctx.stroke();
+      }
+      // current ball + velocity arrow
+      const cy = Math.max(0, yy + vv * sT - 0.5 * G * sT * sT);
+      const by = yToPx(cy);
+      const dv = vv - G * sT;
+      const len = Math.min(46, Math.abs(dv) * 2.2 + 6);
+      drawArrow(ctx, { x: ballX, y: by, dx: 0, dy: (dv >= 0 ? -1 : 1) * len, color: BLUE, width: 3, head: 8 });
+      ctx.fillStyle = '#FFFFFF'; ctx.shadowColor = GOLD; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(ballX, by, 8, 0, 2 * Math.PI); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.font = '10px JetBrains Mono, monospace'; ctx.fillStyle = MUTED;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('ground', ballX, groundY + 5);
+      raf = requestAnimationFrame(draw);
+    };
+    resize();
+    raf = requestAnimationFrame(draw);
+    const ro = new ResizeObserver(resize); ro.observe(wrap);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
+  // ── three stacked, time-synced panels: y (top), v (mid), a (bottom) ──
+  const line = (arr, yaxis, color) => ({
+    x: motion.t, y: arr, type: 'scatter', mode: 'lines', line: { color, width: 2.5 }, yaxis, hoverinfo: 'skip',
+  });
+  const dot = (val, yaxis, color) => ({
+    x: [now.t], y: [val], type: 'scatter', mode: 'markers',
+    marker: { color: '#FFFFFF', size: 8, line: { color, width: 2 } }, yaxis, hoverinfo: 'skip',
+  });
+  const panel = (domain, title, color, range) => ({
+    domain, anchor: 'x', title: { text: title, font: { color } },
+    zeroline: true, zerolinecolor: '#2A3442', tickfont: { size: 11 },
+    ...(range ? { range, autorange: false } : { range: undefined, autorange: true }),
+  });
+  const traces = [
+    line(motion.y, 'y3', GOLD), line(motion.v, 'y2', BLUE), line(motion.a, 'y', GREEN),
+    dot(now.y, 'y3', GOLD), dot(now.v, 'y2', BLUE), dot(now.a, 'y', GREEN),
+  ];
+  const layout = {
+    showlegend: false,
+    margin: { l: 54, r: 12, t: 8, b: 38 },
+    xaxis: { title: { text: 'Time (s)' }, anchor: 'y', domain: [0, 1], range: [0, tGround] },
+    yaxis: panel([0.0, 0.27], 'a (m/s²)', GREEN, [-(G + 2.5), 2]),
+    yaxis2: panel([0.37, 0.63], 'v (m/s)', BLUE, undefined),
+    yaxis3: panel([0.72, 1.0], 'y (m)', GOLD, [0, yMax]),
+    shapes: [{ type: 'line', xref: 'x', yref: 'paper', x0: scrubT, x1: scrubT, y0: 0, y1: 1, line: { color: 'rgba(240,236,227,0.5)', width: 1, dash: 'dot' } }],
+  };
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <ControlPanel onReset={reset}>
         <Slider label="Initial height (y₀)" value={y0} min={1} max={100} step={1} unit="m" onChange={setY0} />
         <Slider label="Initial velocity (v₀)" value={v0} min={-20} max={20} step={0.5} unit="m/s" onChange={setV0} />
-        <div className="mt-4 border-t border-usna-grid pt-3">
+
+        <div className="mt-2 border-t border-usna-grid pt-3">
+          <div className="flex items-center gap-2 mb-2">
+            <button onClick={() => setPlaying((p) => !p)}
+                    className="px-3 py-1.5 rounded text-sm font-medium bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors">
+              {playing ? '❚❚ Pause' : '▶ Drop'}
+            </button>
+            <span className="text-usna-muted text-xs">play / scrub</span>
+          </div>
+          <Slider label="Time (t)" value={Number(scrubT.toFixed(2))} min={0} max={Number(tGround.toFixed(2))} step={0.01} unit="s"
+                  onChange={(v) => { setPlaying(false); setScrub(v); }} />
+        </div>
+
+        <div className="mt-2 border-t border-usna-grid pt-3">
           <Readout label="Time to ground" value={tGround.toFixed(2)} unit="s" />
           <Readout label="Impact speed" value={Math.abs(vImpact).toFixed(1)} unit="m/s" />
+          <div className="mt-2 pt-2 border-t border-usna-grid">
+            <Readout label="height y" value={now.y.toFixed(1)} unit="m" />
+            <Readout label="velocity v" value={now.v.toFixed(1)} unit="m/s" />
+            <Readout label="accel a" value={now.a.toFixed(2)} unit="m/s²" />
+          </div>
         </div>
       </ControlPanel>
 
       <div className="flex-1 min-w-0 flex flex-col gap-4">
-        <div className="bg-usna-card border border-usna-grid rounded-lg p-4 min-w-0 overflow-hidden" style={{ height: 420 }}>
-          <IntensityPlot
-            traces={[posTrace, velTrace]}
-            layoutOverrides={{
-              showlegend: true,
-              legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0)' },
-              xaxis: { title: { text: 'Time (s)' } },
-              yaxis: { title: { text: 'Position y (m)' }, range: undefined },
-              yaxis2: {
-                title: { text: 'Velocity (m/s)' },
-                overlaying: 'y',
-                side: 'right',
-                tickfont: { size: 13, color: BLUE },
-                titlefont: { color: BLUE },
-              },
-            }}
-          />
+        <div className="flex gap-3" style={{ height: 460 }}>
+          <div ref={wrapRef} className="w-24 sm:w-28 shrink-0 bg-usna-card border border-usna-grid rounded-lg overflow-hidden">
+            <canvas ref={canvasRef} className="block" />
+          </div>
+          <div className="flex-1 min-w-0 bg-usna-card border border-usna-grid rounded-lg p-3 overflow-hidden">
+            <IntensityPlot traces={traces} layoutOverrides={layout} />
+          </div>
         </div>
 
         <InfoPanel
           title="Free Fall"
-          description={`An object released from height y₀ with initial velocity v₀ falls under constant gravitational acceleration g = ${G} m/s². Position and velocity are shown as functions of time. The gold curve is position; the blue curve is velocity.`}
-          equation={String.raw`y(t) = y_0 + v_0 t - \tfrac{1}{2}g t^2, \qquad v(t) = v_0 - g t`}
+          description={`Height, velocity, and acceleration share one time axis. Press Drop (or scrub the time slider) and the falling ball, the marker on each curve, and the dotted time line move together. Acceleration is constant at −g the whole way, velocity is a straight line that passes through zero at the top of a throw, and height is a parabola.`}
+          equation={String.raw`y(t) = y_0 + v_0 t - \tfrac{1}{2}g t^2, \quad v(t) = v_0 - g t, \quad a = -g`}
         />
       </div>
     </div>
