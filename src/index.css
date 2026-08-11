@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme variables ─────────────────────────────────────────────────────── */
+
+:root {
+  /* Light mode (default) */
+  --color-gold: #9A7B2E;
+  --color-gold-light: #7D6324;
+  --color-deep: #F5F3EE;
+  --color-card: #FFFFFF;
+  --color-text: #1A1A2E;
+  --color-muted: #5C5C6E;
+  --color-grid: #E0DDD6;
+  --color-zero: #C8C4BC;
+}
+
+.dark {
+  --color-gold: #C5B783;
+  --color-gold-light: #D4C99E;
+  --color-deep: #001233;
+  --color-card: #0A1628;
+  --color-text: #F0ECE3;
+  --color-muted: #8B8C8E;
+  --color-grid: #1A2332;
+  --color-zero: #2A3442;
+}
+
+/* ── Custom slider styling — USNA navy track, gold thumb ─────────────── */
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #00205B;
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: background 0.15s;
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+  background: var(--color-gold-light);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+input[type='range']::-moz-range-thumb:hover {
+  background: var(--color-gold-light);
+}
+
+/* ── KaTeX overrides — adapt to theme ────────────────────────────────── */
+
+.katex {
+  color: var(--color-text);
+  font-size: 1.15em;
+}
