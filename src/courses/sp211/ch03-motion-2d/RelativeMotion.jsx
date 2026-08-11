@@ -66,6 +66,15 @@ const RIVER_W_DEFAULT = 80; // m, bank-to-bank
 
 const DEG = Math.PI / 180;
 
+// Pick a "nice" grid step (1, 2, or 5 × 10^k) so axis ticks land on round metres.
+function niceStep(range, target = 6) {
+  const raw = Math.max(1e-6, range / target);
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / pow;
+  const m = n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10;
+  return m * pow;
+}
+
 // Presets set boat heading to make the teaching moments land.
 //   fastest  → aim 90° across: quickest crossing (max cross-stream speed) but
 //              the current sweeps you downstream so you MISS the dock.
@@ -217,30 +226,62 @@ export default function RelativeMotion({ mode = 'default' }) {
       const s = solRef.current;
       const riverWm = s.riverW;
 
-      // ---- world → screen mapping for THIS pane ----
-      const marginX = Math.max(30, w * 0.10);
-      const topBank = 46;              // screen-y of the far bank (dock side)
-      const botBank = H - 60;          // screen-y of the near bank (launch side)
-      const acrossPx = botBank - topBank;
-      const mAcross = acrossPx / riverWm;          // px per metre (across)
-      const mAlong = mAcross;                      // isotropic scale
-      const originX = x0 + marginX;                // launch point screen-x
+      // ---- fit the whole crossing into this pane (stable, isotropic) ---------
+      // Work in metres, then map with one scale so nothing ever leaves the frame.
+      // The scale depends only on the configuration (not the animation time), so
+      // the view holds steady for a whole crossing and rescales when a control
+      // changes.
+      const T = Number.isFinite(s.crossingTime)
+        ? s.crossingTime
+        : (Math.abs(s.bg.y) > 1e-6 ? riverWm / Math.abs(s.bg.y) : 10);
 
-      const launch = { x: originX, y: botBank };
-      const dockWorldY = riverWm;                  // far bank
+      // Galilean frame shift: the water frame subtracts the water's displacement,
+      // so every ground-fixed feature slides by −v_wg·t.
+      const shiftAt = (tt) => (frame === 'water'
+        ? { x: -s.wg.x * tt, y: -s.wg.y * tt }
+        : { x: 0, y: 0 });
 
-      // metres travelled at prog p (ground-frame displacement of the boat) and
-      // the displacement the water has carried in that time.
-      const tNow = Number.isFinite(s.crossingTime) ? p * s.crossingTime : 0;
-      const groundX = s.bg.x * tNow;   // m downstream (ground frame)
-      const groundY = s.bg.y * tNow;   // m across
-      const waterShiftX = s.wg.x * tNow; // how far the water has carried downstream
-      const waterShiftY = s.wg.y * tNow;
+      // ground-fixed reference points and the boat's per-frame displacement
+      const launchW = { x: 0, y: 0 };
+      const dockW = { x: 0, y: riverWm };
+      const buoyW = { x: riverWm * 0.32, y: riverWm * 0.55 }; // mid-channel hazard
+      const boatDisp = (tt) => (frame === 'water'
+        ? { x: s.bw.x * tt, y: s.bw.y * tt }   // straight up the heading
+        : { x: s.bg.x * tt, y: s.bg.y * tt }); // crabs over the ground
 
-      // In the WATER frame we sit on the water: fixed ground features (banks,
-      // dock, launch) appear displaced by -waterShift.
-      const sceneDX = frame === 'water' ? -waterShiftX * mAlong : 0;
-      const sceneDY = frame === 'water' ? waterShiftY * mAcross : 0; // +y up → screen up
+      // bounding box over the whole crossing (t = 0 and t = T), including the
+      // slide of the ground features in the water frame
+      const cand = [{ x: 0, y: 0 }, { x: 0, y: riverWm }];
+      for (const tt of [0, T]) {
+        const sc = shiftAt(tt);
+        cand.push({ x: launchW.x + sc.x, y: launchW.y + sc.y });
+        cand.push({ x: dockW.x + sc.x, y: dockW.y + sc.y });
+        cand.push({ x: buoyW.x + sc.x, y: buoyW.y + sc.y });
+        cand.push(boatDisp(tt));
+      }
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const c of cand) {
+        if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
+        if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
+      }
+      let boxW = (maxX - minX) || riverWm, boxH = (maxY - minY) || riverWm;
+      minX -= boxW * 0.12; maxX += boxW * 0.12;
+      minY -= boxH * 0.12; maxY += boxH * 0.12;
+      boxW = maxX - minX; boxH = maxY - minY;
+
+      const mL = 48, mR = 16, mT = 26, mB = 38; // px margins (axis labels live here)
+      const availW = Math.max(20, w - mL - mR);
+      const availH = Math.max(20, H - mT - mB);
+      const scale = Math.min(availW / boxW, availH / boxH);
+      const cxW = (minX + maxX) / 2, cyW = (minY + maxY) / 2;
+      const paneCX = x0 + mL + availW / 2;
+      const paneCY = mT + availH / 2;
+      const wx = (X) => paneCX + (X - cxW) * scale;   // metres → screen-x
+      const wy = (Y) => paneCY - (Y - cyW) * scale;   // metres → screen-y (+y up)
+
+      const t = p * T;
+      const sh = shiftAt(t);
+      const scr = (X, Y) => ({ x: wx(X + sh.x), y: wy(Y + sh.y) }); // ground-fixed point now
 
       // ---- clip to this pane so split panes never bleed ----
       ctx.save();
@@ -248,103 +289,123 @@ export default function RelativeMotion({ mode = 'default' }) {
       ctx.rect(x0, 0, w, H);
       ctx.clip();
 
-      // ---- water body ----
+      // ---- banks and water body (banks are ground-fixed → slide in water frame) ----
+      const nearY = scr(0, 0).y;          // near bank, world y = 0
+      const farY = scr(0, riverWm).y;     // far bank, world y = riverW
+      const bandTop = Math.min(nearY, farY), bandBot = Math.max(nearY, farY);
       ctx.fillStyle = '#0B1A33';
-      ctx.fillRect(x0, topBank, w, botBank - topBank);
+      ctx.fillRect(x0, bandTop, w, bandBot - bandTop);
+      ctx.fillStyle = 'rgba(80,90,70,0.22)';
+      ctx.fillRect(x0, 0, w, Math.max(0, bandTop));
+      ctx.fillRect(x0, bandBot, w, H - bandBot);
+      ctx.strokeStyle = GRID; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x0, nearY); ctx.lineTo(x0 + w, nearY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x0, farY); ctx.lineTo(x0 + w, farY); ctx.stroke();
 
-      // ---- flow streaks ----------------------------------------------------
-      // FIX: streaks represent the WATER's own motion. In the ground frame the
-      // water flows past, so the streaks scroll downstream. In the water frame
-      // we RIDE the water — the water is motionless relative to us — so the
-      // streaks FREEZE. (The banks slide upstream instead; see sceneDX below.)
-      const flowPhase = frame === 'water'
-        ? 0
-        : (now / 1000) * s.wg.x * mAlong * 0.6;
-      ctx.strokeStyle = 'rgba(127,183,126,0.18)';
+      // ---- coordinate grid for this observer's frame (fixed metre lattice) ----
+      // In the ground frame the grid is the ground; in the water frame it is the
+      // water, and the ground features slide across it. The labels are metres.
+      const visX0 = cxW - (availW / 2) / scale, visX1 = cxW + (availW / 2) / scale;
+      const visY0 = cyW - (availH / 2) / scale, visY1 = cyW + (availH / 2) / scale;
+      const gstep = niceStep(Math.max(visX1 - visX0, visY1 - visY0));
+      ctx.strokeStyle = 'rgba(90,105,125,0.22)';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = MUTED;
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      for (let gx = Math.ceil(visX0 / gstep) * gstep; gx <= visX1; gx += gstep) {
+        const sx = wx(gx);
+        ctx.beginPath(); ctx.moveTo(sx, mT); ctx.lineTo(sx, H - mB); ctx.stroke();
+        ctx.fillText(String(Math.round(gx)), sx, H - mB + 4);
+      }
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      for (let gy = Math.ceil(visY0 / gstep) * gstep; gy <= visY1; gy += gstep) {
+        const sy = wy(gy);
+        ctx.beginPath(); ctx.moveTo(x0 + mL, sy); ctx.lineTo(x0 + w - mR, sy); ctx.stroke();
+        ctx.fillText(String(Math.round(gy)), x0 + mL - 5, sy);
+      }
+      ctx.fillStyle = 'rgba(139,140,142,0.9)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('downstream x (m)', x0 + mL + availW / 2, H - 1);
+      ctx.save();
+      ctx.translate(x0 + 11, mT + availH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('across y (m)', 0, 0);
+      ctx.restore();
+
+      // ---- flow streaks: the water's own motion (scroll in ground, still in water) ----
+      ctx.strokeStyle = 'rgba(127,183,126,0.16)';
       ctx.lineWidth = 1.5;
-      const streakGap = 34;
-      for (let yy = topBank + 16; yy < botBank; yy += 20) {
+      const flowPhase = frame === 'water' ? 0 : (now / 1000) * s.wg.x * scale * 0.6;
+      const streakGap = 32;
+      for (let yy = bandTop + 14; yy < bandBot; yy += 18) {
         for (let k = -2; k < w / streakGap + 2; k++) {
           const sx = x0 + (((k * streakGap + flowPhase) % (w + streakGap) + (w + streakGap)) % (w + streakGap) - streakGap);
           ctx.beginPath();
           ctx.moveTo(sx, yy);
-          ctx.lineTo(sx + 14, yy);
+          ctx.lineTo(sx + 13, yy);
           ctx.stroke();
         }
       }
 
-      // ---- banks (slide in water frame) ----
-      const bankY = (worldY) => botBank - worldY * mAcross + sceneDY;
-      ctx.strokeStyle = GRID;
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(x0, bankY(0)); ctx.lineTo(x0 + w, bankY(0)); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x0, bankY(riverWm)); ctx.lineTo(x0 + w, bankY(riverWm)); ctx.stroke();
-
-      // grass tint above the far bank / below the near bank
-      ctx.fillStyle = 'rgba(80,90,70,0.25)';
-      ctx.fillRect(x0, 0, w, Math.max(0, bankY(riverWm)));
-      ctx.fillRect(x0, bankY(0), w, H - bankY(0));
-
-      // ---- dock on the far bank, directly opposite the launch (slides in water frame) ----
-      const dockScreenX = launch.x + sceneDX;
-      const dockScreenY = bankY(dockWorldY);
-      ctx.fillStyle = GOLD;
-      ctx.fillRect(dockScreenX - 16, dockScreenY - 5, 32, 10);
-      ctx.font = '12px JetBrains Mono, monospace';
-      ctx.fillStyle = GOLD;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('DOCK', dockScreenX, dockScreenY - 8);
-
-      // launch marker (a fixed ground point → slides in water frame too)
-      const launchScreenX = launch.x + sceneDX;
-      const launchScreenY = bankY(0);
-      ctx.fillStyle = MUTED;
-      ctx.beginPath();
-      ctx.arc(launchScreenX, launchScreenY, 4, 0, 2 * Math.PI);
-      ctx.fill();
-
       // ---- intended straight-across line (launch → dock), a ground reference ----
-      ctx.strokeStyle = 'rgba(197,183,131,0.35)';
+      const Lp = scr(launchW.x, launchW.y);
+      const Dp = scr(dockW.x, dockW.y);
+      ctx.strokeStyle = 'rgba(197,183,131,0.30)';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 6]);
-      ctx.beginPath();
-      ctx.moveTo(launchScreenX, launchScreenY);
-      ctx.lineTo(dockScreenX, dockScreenY);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(Lp.x, Lp.y); ctx.lineTo(Dp.x, Dp.y); ctx.stroke();
       ctx.setLineDash([]);
 
-      // ---- boat screen position depends on the frame ----
-      //   ground frame: boat = launch + ground displacement (crabs diagonally)
-      //   water frame : boat = launch + (ground disp − water shift), i.e. the
-      //                 boat's displacement THROUGH the water → dead straight up
-      //                 its heading, from a launch point that itself slides.
-      const boatDispX = frame === 'water' ? (groundX - waterShiftX) : groundX;
-      const boatDispY = frame === 'water' ? (groundY - waterShiftY) : groundY;
-      // Anchor the boat to the (possibly shifted) launch point so that in the
-      // water frame the boat runs straight while the launch/banks slide together.
-      const boatX = launchScreenX + boatDispX * mAlong;
-      const boatY = launchScreenY - boatDispY * mAcross;
+      // ---- mid-channel buoy: a second ground-fixed hazard (drifts in water frame) ----
+      const Bp = scr(buoyW.x, buoyW.y);
+      ctx.fillStyle = '#D9843B';
+      ctx.beginPath(); ctx.arc(Bp.x, Bp.y, 7, 0, 2 * Math.PI); ctx.fill();
+      ctx.strokeStyle = NAVY; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = '#D9843B'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(Bp.x, Bp.y - 7); ctx.lineTo(Bp.x, Bp.y - 19); ctx.stroke();
+      ctx.fillStyle = '#D9843B';
+      ctx.beginPath(); ctx.moveTo(Bp.x, Bp.y - 19); ctx.lineTo(Bp.x + 10, Bp.y - 16); ctx.lineTo(Bp.x, Bp.y - 13); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = MUTED; ctx.font = '10px JetBrains Mono, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('buoy', Bp.x, Bp.y + 8);
 
-      // ---- travelled track (the crab path in this frame) ----
+      // ---- dock on the far bank, opposite the launch (large, clearly marked) ----
+      ctx.fillStyle = GOLD;
+      ctx.fillRect(Dp.x - 28, Dp.y - 7, 56, 14);
+      ctx.strokeStyle = NAVY; ctx.lineWidth = 2;
+      ctx.strokeRect(Dp.x - 28, Dp.y - 7, 56, 14);
+      ctx.fillStyle = '#7A5A2E';
+      ctx.fillRect(Dp.x - 26, Dp.y - 7, 3, 14);
+      ctx.fillRect(Dp.x + 23, Dp.y - 7, 3, 14);
+      ctx.fillStyle = GOLD; ctx.font = 'bold 12px JetBrains Mono, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('DOCK', Dp.x, Dp.y - 11);
+
+      // ---- launch marker (a fixed ground point → slides in the water frame) ----
+      ctx.fillStyle = MUTED;
+      ctx.beginPath(); ctx.arc(Lp.x, Lp.y, 4, 0, 2 * Math.PI); ctx.fill();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.font = '10px JetBrains Mono, monospace';
+      ctx.fillText('launch', Lp.x, Lp.y + 6);
+
+      // ---- travelled track in this observer's frame ----
       ctx.strokeStyle = TRACK;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      const STEPS = 48;
-      for (let i = 0; i <= Math.max(1, Math.round(p * STEPS)); i++) {
-        const f = (i / STEPS);
-        const tt = Number.isFinite(s.crossingTime) ? f * s.crossingTime : 0;
-        const gx = s.bg.x * tt, gy = s.bg.y * tt;
-        const wx = s.wg.x * tt, wy = s.wg.y * tt;
-        const dispX = frame === 'water' ? (gx - wx) : gx;
-        const dispY = frame === 'water' ? (gy - wy) : gy;
-        const scrX = launchScreenX + dispX * mAlong;
-        const scrY = launchScreenY - dispY * mAcross;
-        if (i === 0) ctx.moveTo(scrX, scrY); else ctx.lineTo(scrX, scrY);
+      const STEPS = 60;
+      const upto = Math.max(1, Math.round(p * STEPS));
+      for (let i = 0; i <= upto; i++) {
+        const d = boatDisp((i / STEPS) * T);
+        const px = wx(d.x), py = wy(d.y);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
       ctx.stroke();
 
-      // ---- the boat hull, pointing along its HEADING through the water ----
+      // ---- the boat, positioned in this frame and pointed along its heading ----
+      const bd = boatDisp(t);
+      const boatX = wx(bd.x), boatY = wy(bd.y);
       const screenHeading = Math.atan2(-s.bw.y, s.bw.x); // +y-up world → screen
       ctx.save();
       ctx.translate(boatX, boatY);
@@ -353,9 +414,9 @@ export default function RelativeMotion({ mode = 'default' }) {
       ctx.strokeStyle = NAVY;
       ctx.lineWidth = 1.5;
       ctx.beginPath();       // simple pointed hull, nose along +x (local)
-      ctx.moveTo(14, 0);
-      ctx.lineTo(-8, 7);
-      ctx.lineTo(-8, -7);
+      ctx.moveTo(15, 0);
+      ctx.lineTo(-9, 8);
+      ctx.lineTo(-9, -8);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
@@ -366,7 +427,6 @@ export default function RelativeMotion({ mode = 'default' }) {
       const a1 = { dx: s.bw.x * vScale, dy: -s.bw.y * vScale };  // boat/water (blue)
       const a2 = { dx: s.wg.x * vScale, dy: -s.wg.y * vScale };  // current (green), tip-to-tail
       const res = resultant([a1, a2]);                           // boat/ground (track)
-
       drawArrow(ctx, { x: boatX, y: boatY, dx: a1.dx, dy: a1.dy, color: BLUE, width: 3, label: 'v_bw' });
       drawArrow(ctx, { x: boatX + a1.dx, y: boatY + a1.dy, dx: a2.dx, dy: a2.dy, color: CURRENT, width: 3, label: 'v_wg' });
       drawArrow(ctx, { x: boatX, y: boatY, dx: res.dx, dy: res.dy, color: TRACK, width: 3.5, label: 'v_bg' });
@@ -374,7 +434,6 @@ export default function RelativeMotion({ mode = 'default' }) {
       // ---- drag handle on the v_bw tip (interactive pane only) ----
       const tipX = boatX + a1.dx, tipY = boatY + a1.dy;
       if (interactive) {
-        // a grabbable ring so it reads as a handle on a phone
         ctx.beginPath();
         ctx.arc(tipX, tipY, 9, 0, 2 * Math.PI);
         ctx.strokeStyle = BLUE;
@@ -382,7 +441,6 @@ export default function RelativeMotion({ mode = 'default' }) {
         ctx.stroke();
         ctx.fillStyle = 'rgba(91,155,213,0.25)';
         ctx.fill();
-        // stash geometry for the pointer handler
         hitRef.current = { boatX, boatY, tipX, tipY };
       }
 
@@ -393,9 +451,9 @@ export default function RelativeMotion({ mode = 'default' }) {
       ctx.fillStyle = MUTED;
       ctx.fillText(
         frame === 'ground'
-          ? 'GROUND FRAME · banks fixed, boat crabs'
-          : 'WATER FRAME · water frozen, banks drift',
-        x0 + 12, topBank + 8,
+          ? 'Ground frame: banks fixed, boat crabs across'
+          : 'Water frame: water at rest, banks drift',
+        x0 + mL + 4, mT + 2,
       );
 
       ctx.restore(); // undo clip
@@ -556,7 +614,7 @@ export default function RelativeMotion({ mode = 'default' }) {
               ? 'Banks fixed; the boat crabs diagonally, the current flows past.'
               : view === 'water'
                 ? 'Ride the current: the water is frozen, the boat runs straight, the banks drift upstream.'
-                : 'Both observers at once — same motion, side by side.'}
+                : 'Both observers at once: same motion, shown side by side.'}
           </p>
         </div>
 
@@ -616,7 +674,7 @@ export default function RelativeMotion({ mode = 'default' }) {
           <Readout label={`Course (${courseSide})`} value={courseStr} unit="°" />
           <div className={`mt-2 text-xs font-mono px-2 py-1 rounded ${onDock ? 'bg-usna-gold/20 text-usna-gold' : 'bg-usna-deep text-usna-muted'}`}>
             {Number.isFinite(sol.drift)
-              ? (onDock ? 'ON THE DOCK — cross-stream sum cancels the current' : `Missing the dock by ${driftStr} m ${sol.drift >= 0 ? 'downstream' : 'upstream'}`)
+              ? (onDock ? 'On the dock: the cross-stream components cancel the current' : `Missing the dock by ${driftStr} m ${sol.drift >= 0 ? 'downstream' : 'upstream'}`)
               : 'Boat cannot reach the far bank (no cross-stream velocity)'}
           </div>
         </div>
@@ -652,9 +710,9 @@ export default function RelativeMotion({ mode = 'default' }) {
 
           {/* legend chips */}
           <div className="absolute bottom-2 right-3 text-[11px] font-mono space-y-0.5 text-right pointer-events-none">
-            <div style={{ color: BLUE }}>v_bw — boat through water</div>
-            <div style={{ color: CURRENT }}>v_wg — current</div>
-            <div style={{ color: TRACK }}>v_bg — track over ground</div>
+            <div style={{ color: BLUE }}>v_bw: boat through water</div>
+            <div style={{ color: CURRENT }}>v_wg: current</div>
+            <div style={{ color: TRACK }}>v_bg: track over ground</div>
           </div>
           {/* crossing progress */}
           <div className="absolute bottom-2 left-3 w-40 h-1.5 rounded bg-usna-deep overflow-hidden">
@@ -671,6 +729,6 @@ export default function RelativeMotion({ mode = 'default' }) {
 const INFO = {
   title: 'Relative motion is vector addition',
   description:
-    'The boat\'s velocity over the ground is the vector sum of its velocity through the water and the water\'s velocity over the ground. Aim the boat "straight across" (90°) and it still lands downstream, because the current quietly adds a sideways component you never steered — that is the "fastest crossing" preset: you reach the far bank in the least time (maximum cross-stream speed) but you miss. To hit the dock you must crab upstream until the boat\'s upstream component exactly cancels the current, which costs you crossing time — that is the "hit the dock" preset. Steer by dragging the blue v_bw arrow tip and watch the triangle reform. The deepest move is the observer view: in the ground frame the boat crabs diagonally while the banks stand still and the current flows past; in the water frame you ride the current, so the water is frozen and the boat runs dead straight up its heading while the whole shoreline slides upstream. The split view shows both at once — same motion, two observers. Naval hook: this is the geometry of ship-relative (apparent) wind and of an UNREP approach — a replenishment ship matches the receiving ship\'s course and speed so that, in the ship-to-ship frame, the two vessels appear motionless and lines can be passed across a fixed gap even though both are making 12+ knots over the ground.',
+    'The boat\'s velocity over the ground is the vector sum of its velocity through the water and the water\'s velocity over the ground. Aiming straight across (90 degrees) still lands the boat downstream, because the current contributes a cross-stream component. That is the "fastest crossing" preset: it reaches the far bank in the least time but misses the dock. Landing on the dock requires crabbing upstream until the boat\'s upstream component cancels the current, at the cost of a longer crossing. The observer view is the central idea. In the ground frame the banks are fixed, the boat crabs diagonally, and the current flows past. In the water frame the water is at rest, the boat runs straight along its heading, and the shoreline drifts upstream. The split view shows both frames at once. The same geometry governs apparent (ship-relative) wind and an underway replenishment approach, where a supply ship matches the receiving ship\'s course and speed so the two vessels appear motionless relative to each other while both make way over the ground.',
   equation: String.raw`\vec v_{bg} = \vec v_{bw} + \vec v_{wg}`,
 };

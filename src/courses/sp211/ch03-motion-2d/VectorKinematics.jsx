@@ -60,11 +60,12 @@ const BG = '#0D1321';
 
 const HIT = 16;             // px pickup radius for dragging a waypoint
 const DELETE_HIT = 12;      // px radius for the little "x" delete target
-const ARC_SAMPLES = 1400;   // resolution of the arc-length table around the loop
+const ARC_SAMPLES = 1800;   // resolution of the arc-length table around the loop
 const MIN_WAYPOINTS = 3;    // below this a closed loop is ill-defined
 
 const COS20 = Math.cos((20 * Math.PI) / 180); // scale-free banner threshold ≈ 0.94
-const STRIP_N = 160;        // samples for the |v|-vs-φ strip chart
+const STRIP_N = 240;        // samples for the strip charts (spatial resolution)
+const STRIP_HZ = 0.045;     // strip republish period (s) ≈ 22 Hz — cursor tracks the particle
 
 // A pleasant default racetrack loop, in normalized [0,1] canvas coords so it
 // scales to any container size. Reset returns here.
@@ -83,7 +84,7 @@ const DEFAULT_WAYPOINTS = [
 
 // Perfect circle: equally spaced points on a circle → constant curvature, so
 // a_⊥ is the SAME everywhere and the osculating circle equals the path itself.
-function circleWaypoints(n = 8, cx = 0.5, cy = 0.5, r = 0.32) {
+function circleWaypoints(n = 16, cx = 0.5, cy = 0.5, r = 0.32) {
   const out = [];
   for (let i = 0; i < n; i++) {
     const a = (i / n) * 2 * Math.PI - Math.PI / 2;
@@ -116,11 +117,28 @@ function figureEightWaypoints(n = 16, cx = 0.5, cy = 0.5, w = 0.36, h = 0.24) {
   return out;
 }
 
+// Exact parametric forms of the analytic presets (u in [0,1) → normalized x,y).
+// The path is sampled directly from these, so curvature is clean (a circle is a
+// true circle). The *Waypoints functions above just place the draggable handles
+// on the same curve; editing a handle drops back to the spline.
+const circleCurve = (u) => {
+  const a = 2 * Math.PI * u - Math.PI / 2;
+  return { x: 0.5 + 0.32 * Math.cos(a), y: 0.5 + 0.32 * Math.sin(a) };
+};
+const ellipseCurve = (u) => {
+  const a = 2 * Math.PI * u - Math.PI / 2;
+  return { x: 0.5 + 0.4 * Math.cos(a), y: 0.5 + 0.24 * Math.sin(a) };
+};
+const figureEightCurve = (u) => {
+  const t = 2 * Math.PI * u;
+  return { x: 0.5 + 0.36 * Math.sin(t), y: 0.5 - 0.24 * Math.sin(t) * Math.cos(t) };
+};
+
 const PRESETS = {
-  racetrack: { label: 'Racetrack', make: () => DEFAULT_WAYPOINTS.map((p) => ({ ...p })) },
-  circle: { label: 'Circle', make: () => circleWaypoints() },
-  ellipse: { label: 'Ellipse', make: () => ellipseWaypoints() },
-  figure8: { label: 'Figure-8', make: () => figureEightWaypoints() },
+  racetrack: { label: 'Racetrack', make: () => DEFAULT_WAYPOINTS.map((p) => ({ ...p })), curve: null },
+  circle: { label: 'Circle', make: () => circleWaypoints(), curve: circleCurve },
+  ellipse: { label: 'Ellipse', make: () => ellipseWaypoints(), curve: ellipseCurve },
+  figure8: { label: 'Figure-8', make: () => figureEightWaypoints(), curve: figureEightCurve },
 };
 
 // ── spline geometry ────────────────────────────────────────────────────────
@@ -166,9 +184,37 @@ function curvatureAt(a, b, c) {
   return (2 * cross) / denom;          // signed κ (1/px)
 }
 
-// Sample the whole CLOSED loop into a dense polyline of {x,y} points (canvas px)
-// plus a cumulative arc-length table so we can map arc length → point, plus a
-// per-point signed curvature κ (used to heat-color the path).
+// Given a closed polyline of px points, build the cumulative arc-length table
+// and per-vertex signed curvature κ (used for a_perp and the κ heat-coloring).
+function finishPath(pts) {
+  const m = pts.length;
+  // cumulative arc length (wrapping back to the start to close the loop)
+  const cum = new Float64Array(m + 1);
+  for (let i = 1; i <= m; i++) {
+    const a = pts[i - 1];
+    const b = pts[i % m];
+    cum[i] = cum[i - 1] + Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  // signed curvature per vertex (wrapping neighbours, so the closed loop is
+  // continuous). A wider neighbour step averages out any small ripple between
+  // vertices while broad features (an ellipse's peaks) still resolve.
+  const step = Math.max(1, Math.floor(m / 120));
+  const kappa = new Float64Array(m);
+  let kMax = 1e-9;
+  for (let i = 0; i < m; i++) {
+    const a = pts[(i - step + m) % m];
+    const b = pts[i];
+    const c = pts[(i + step) % m];
+    kappa[i] = curvatureAt(a, b, c);
+    const k = Math.abs(kappa[i]);
+    if (k > kMax) kMax = k;
+  }
+  return { pts, cum, total: cum[m], kappa, kMax };
+}
+
+// Hand-drawn / edited loop: a closed centripetal Catmull-Rom spline through the
+// waypoints. C1-continuous, so its curvature ripples slightly between control
+// points — fine for an organic custom shape.
 function buildPath(waypoints) {
   const n = waypoints.length;
   const perSeg = Math.max(8, Math.floor(ARC_SAMPLES / n));
@@ -182,28 +228,18 @@ function buildPath(waypoints) {
       pts.push(catmullRom(p0, p1, p2, p3, j / perSeg));
     }
   }
-  const m = pts.length;
-  // cumulative arc length (wrapping back to the start to close the loop)
-  const cum = new Float64Array(m + 1);
-  for (let i = 1; i <= m; i++) {
-    const a = pts[i - 1];
-    const b = pts[i % m];
-    cum[i] = cum[i - 1] + Math.hypot(b.x - a.x, b.y - a.y);
-  }
-  // signed curvature per vertex (wrapping neighbours, so the closed loop is
-  // continuous). Take a small step of neighbours for a stable estimate.
-  const step = Math.max(1, Math.floor(m / 240));
-  const kappa = new Float64Array(m);
-  let kMax = 1e-9;
-  for (let i = 0; i < m; i++) {
-    const a = pts[(i - step + m) % m];
-    const b = pts[i];
-    const c = pts[(i + step) % m];
-    kappa[i] = curvatureAt(a, b, c);
-    const k = Math.abs(kappa[i]);
-    if (k > kMax) kMax = k;
-  }
-  return { pts, cum, total: cum[m], kappa, kMax };
+  return finishPath(pts);
+}
+
+// Analytic preset (circle / ellipse / figure-8): sample the EXACT parametric
+// curve. This gives a mathematically clean curvature — a circle has genuinely
+// constant κ, so a_perp is flat — instead of the spline ripple you get from
+// interpolating a handful of control points. `fn(u)` takes u in [0,1) and
+// returns a normalized {x,y}; `toPx` maps it into canvas pixels.
+function buildParametricPath(fn, toPx) {
+  const pts = [];
+  for (let i = 0; i < ARC_SAMPLES; i++) pts.push(toPx(fn(i / ARC_SAMPLES)));
+  return finishPath(pts);
 }
 
 // Point on the loop at arc length s (px), wrapping. Linear interp within the
@@ -224,6 +260,21 @@ function pointAtLength(path, s) {
   const a = pts[(i - 1) % pts.length];
   const b = pts[i % pts.length];
   return { x: a.x + (b.x - a.x) * w, y: a.y + (b.y - a.y) * w };
+}
+
+// Magnitude of the path curvature |κ| = 1/r at arc length s (px), wrapping. Used
+// to plot the perpendicular acceleration a_perp = v^2 |κ| across the whole loop.
+function kappaAtLength(path, s) {
+  const { cum, total, kappa, pts } = path;
+  if (total <= 0) return 0;
+  const d = ((s % total) + total) % total;
+  let lo = 0, hi = pts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < d) lo = mid + 1; else hi = mid;
+  }
+  const i = Math.max(1, lo);
+  return Math.abs(kappa[i % pts.length]);
 }
 
 // Speed profile: fraction of the loop covered as a function of loop phase
@@ -281,9 +332,17 @@ function Sandbox() {
   // Waypoints live in normalized [0,1] coords so the loop survives resize; we
   // keep them in a ref (mutated by pointer handlers) AND in state (to trigger
   // re-render of the count / delete-button availability).
-  const [waypoints, setWaypoints] = useState(() => DEFAULT_WAYPOINTS.map((p) => ({ ...p })));
+  // Start on a symmetric shape (ellipse) so the first impression reads cleanly:
+  // constant speed, a single centripetal arrow that breathes with the curvature.
+  const [waypoints, setWaypoints] = useState(() => ellipseWaypoints());
   const wpRef = useRef(waypoints);
-  wpRef.current = waypoints;
+  // Pointer-drag state (in a ref; no re-render while dragging).
+  const drag = useRef({ index: -1 });
+  // Mirror committed state into the ref only when NOT mid-drag. The rAF loop
+  // re-renders 10–22×/s (readouts, strip publish); without this guard each such
+  // render would overwrite the live dragged positions with the last committed
+  // state, so a point would jump and often snap back to its origin on release.
+  if (drag.current.index < 0) wpRef.current = waypoints;
 
   // UI toggles.
   const [uniform, setUniform] = useState(true);       // uniform vs speeding-up
@@ -294,8 +353,8 @@ function Sandbox() {
   const [showKappa, setShowKappa] = useState(true);   // color path by curvature
   const [trail, setTrail] = useState(true);
   const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState(0.35);           // loops per second (phase rate)
-  const [presetKey, setPresetKey] = useState('racetrack');
+  const [speed, setSpeed] = useState(0.15);           // loops per second (phase rate)
+  const [presetKey, setPresetKey] = useState('ellipse');
 
   // Freeze-frame: when paused, this slider drives φ directly. We keep the live
   // phase in a ref (the loop owns it) and a mirrored state value for the slider.
@@ -312,25 +371,32 @@ function Sandbox() {
   const [readout, setReadout] = useState({ speed: 0, aMag: 0, angle: 0, aT: 0, aN: 0, radius: Infinity });
 
   // Strip-chart data (|v| vs φ over the whole loop) + cursor, published throttled.
-  const [strip, setStrip] = useState({ phi: [], v: [], cursorPhi: 0, cursorV: 0, vMax: 1 });
+  const [strip, setStrip] = useState({
+    t: [], v: [], aPar: [], aPerp: [], period: 1,
+    cursorT: 0, cursorV: 0, cursorAPar: 0, cursorAPerp: 0,
+    vMax: 1, aMax: 1,
+  });
 
   const applyPreset = useCallback((key) => {
     const p = PRESETS[key];
     if (!p) return;
     setPresetKey(key);
+    curveRef.current = p.curve || null; // exact curve for analytic presets
     setWaypoints(p.make());
   }, []);
 
   const reset = useCallback(() => {
-    setPresetKey('racetrack');
-    setWaypoints(DEFAULT_WAYPOINTS.map((p) => ({ ...p })));
+    setPresetKey('ellipse');
+    curveRef.current = ellipseCurve;
+    setWaypoints(ellipseWaypoints());
     setUniform(true); setShowV(true); setShowA(true); setShowTN(true);
     setShowCircle(true); setShowKappa(true); setTrail(true); setPlaying(true);
-    setSpeed(0.35); setScrubPhase(0); phaseRef.current = 0;
+    setSpeed(0.15); setScrubPhase(0); phaseRef.current = 0;
   }, []);
 
-  // Pointer interaction state (in a ref; no re-render while dragging).
-  const drag = useRef({ index: -1 });
+  // Active analytic curve (circle/ellipse/figure-8) sampled for the path; null
+  // once the loop is edited into a custom spline. Starts on the ellipse default.
+  const curveRef = useRef(ellipseCurve);
 
   // ── the one effect: setup, resize observer, pointer handlers, rAF loop ──
   useEffect(() => {
@@ -349,13 +415,22 @@ function Sandbox() {
       ctx = setupCanvas(canvas, W, H);
     };
 
-    // normalized [0,1] → px and back
-    const toPx = (p) => ({ x: p.x * W, y: p.y * H });
-    const toNorm = (x, y) => ({ x: x / W, y: y / H });
+    // normalized [0,1] → px and back, using a single (letterboxed) scale so the
+    // plane is ISOTROPIC: a normalized circle renders as a real circle at any
+    // container aspect ratio, not an ellipse stretched by W/H.
+    const box = () => {
+      const S = Math.min(W, H);
+      return { S, ox: (W - S) / 2, oy: (H - S) / 2 };
+    };
+    const toPx = (p) => { const { S, ox, oy } = box(); return { x: ox + p.x * S, y: oy + p.y * S }; };
+    const toNorm = (x, y) => { const { S, ox, oy } = box(); return { x: (x - ox) / S, y: (y - oy) / S }; };
 
-    // Build the px-space path fresh each frame from current (normalized)
-    // waypoints, so dragging updates the curve live and resize is automatic.
-    const currentPath = () => buildPath(wpRef.current.map(toPx));
+    // Build the px-space path fresh each frame. Analytic presets sample their
+    // exact parametric curve (clean curvature); an edited loop uses the spline
+    // through the current (normalized) waypoints, so dragging updates it live.
+    const currentPath = () => (curveRef.current
+      ? buildParametricPath(curveRef.current, toPx)
+      : buildPath(wpRef.current.map(toPx)));
 
     // Where the delete "x" sits relative to a waypoint (up-right of the dot).
     const deletePos = (px) => ({ x: px.x + 13, y: px.y - 13 });
@@ -374,6 +449,7 @@ function Sandbox() {
         const px = toPx(wps[i]);
         const dp = deletePos(px);
         if (Math.hypot(x - dp.x, y - dp.y) <= DELETE_HIT && wps.length > MIN_WAYPOINTS) {
+          curveRef.current = null; // editing → drop to the spline
           setPresetKey('custom');
           setWaypoints((prev) => prev.filter((_, k) => k !== i));
           return;
@@ -383,6 +459,7 @@ function Sandbox() {
       for (let i = 0; i < wps.length; i++) {
         const px = toPx(wps[i]);
         if (Math.hypot(x - px.x, y - px.y) <= HIT) {
+          curveRef.current = null; // path follows the dragged handle via the spline
           drag.current.index = i;
           canvas.setPointerCapture?.(e.pointerId);
           return;
@@ -391,6 +468,7 @@ function Sandbox() {
       // 3) empty space → add a waypoint, inserted after the nearest edge midpoint
       //    so the loop stays sensible instead of jumping across itself.
       const nrm = toNorm(x, y);
+      curveRef.current = null; // editing → drop to the spline
       setPresetKey('custom');
       setWaypoints((prev) => {
         if (prev.length < 2) return [...prev, nrm];
@@ -711,29 +789,49 @@ function Sandbox() {
         if (advancing) setScrubPhase(phase);
       }
 
-      // ── publish strip chart |v| vs φ (throttled to ~5 Hz) ──────────────────
-      // |v|(φ) = L·rate·f'(φ). We sample the whole loop so the chart shows the
-      // profile at every position, then drop a cursor at the current φ. Flat for
-      // uniform (a_t=0); sinusoidal for speeding-up (its slope IS a_t).
+      // ── publish strip charts vs TIME (throttled) ──────────────────────────
+      // Loop phase φ advances at the constant lap rate, so elapsed time within a
+      // lap is t = φ / rate and one lap lasts period = 1 / rate. We plot against
+      // t (seconds), sampling the whole lap:
+      //   speed         |v|(t) = L·rate·f'(φ)
+      //   tangential    a∥(t)  = d|v|/dt = L·rate²·f''(φ)   (zero when uniform)
+      //   perpendicular a⊥(t)  = |v|²·|κ|                    (centripetal part)
+      // then drop a cursor at the current time.
       stripClock += dt;
-      if (stripClock > 0.2 && L > 0) {
+      if (stripClock > STRIP_HZ && L > 0) {
         stripClock = 0;
-        const phiArr = new Array(STRIP_N + 1);
+        const twoPi = 2 * Math.PI;
+        const period = 1 / rate; // seconds per lap
+        // f''(φ): 0 for uniform; derivative of 1 + 0.85·cos(2πφ) otherwise
+        const fSecond = (ph) => (c.uniform ? 0 : -0.85 * twoPi * Math.sin(twoPi * ph));
+        const tArr = new Array(STRIP_N + 1);
         const vArr = new Array(STRIP_N + 1);
-        let vMaxLocal = 1e-9;
+        const aParArr = new Array(STRIP_N + 1);
+        const aPerpArr = new Array(STRIP_N + 1);
+        let vMaxLocal = 1e-9, aMaxLocal = 1e-9;
         for (let i = 0; i <= STRIP_N; i++) {
           const ph = i / STRIP_N;
           const vv = L * rate * fractionDeriv(ph, c.uniform);
-          phiArr[i] = ph;
-          vArr[i] = vv;
+          const aPar = L * rate * rate * fSecond(ph);
+          const aPerp = vv * vv * kappaAtLength(path, phaseToFraction(ph, c.uniform) * L);
+          tArr[i] = ph * period; vArr[i] = vv; aParArr[i] = aPar; aPerpArr[i] = aPerp;
           if (vv > vMaxLocal) vMaxLocal = vv;
+          if (Math.abs(aPar) > aMaxLocal) aMaxLocal = Math.abs(aPar);
+          if (aPerp > aMaxLocal) aMaxLocal = aPerp;
         }
+        const curV = L * rate * fractionDeriv(phase, c.uniform);
         setStrip({
-          phi: phiArr,
+          t: tArr,
           v: vArr,
-          cursorPhi: phase,
-          cursorV: L * rate * fractionDeriv(phase, c.uniform),
+          aPar: aParArr,
+          aPerp: aPerpArr,
+          period,
+          cursorT: phase * period,
+          cursorV: curV,
+          cursorAPar: L * rate * rate * fSecond(phase),
+          cursorAPerp: curV * curV * kappaAtLength(path, phaseToFraction(phase, c.uniform) * L),
           vMax: vMaxLocal,
+          aMax: aMaxLocal,
         });
       }
 
@@ -797,35 +895,72 @@ function Sandbox() {
   );
 
   // ── strip-chart traces + layout ──────────────────────────────────────────
-  // |v| vs loop position φ. Override the shared IntensityPlot base axes (which
-  // default to [0,1.05] / "Normalized Intensity") so this reads as a physics plot.
+  // Both charts plot against time t (seconds) over one lap. Override the shared
+  // IntensityPlot base axes (which default to [0,1.05] / "Normalized Intensity")
+  // so these read as physics plots. A shared bottom-margin keeps the x-axis
+  // title inside the container (otherwise it clips).
+  const tMax = strip.period || 1;
+  const xAxis = () => ({
+    title: { text: 'time (s)', standoff: 8 }, range: [0, tMax], autorange: false,
+    zeroline: false, tickfont: { size: 11 },
+  });
+  const cursorShape = {
+    type: 'line', xref: 'x', yref: 'paper',
+    x0: strip.cursorT, x1: strip.cursorT, y0: 0, y1: 1,
+    line: { color: 'rgba(240,236,227,0.5)', width: 1, dash: 'dot' },
+  };
   const stripTraces = [
     {
-      x: strip.phi, y: strip.v, type: 'scatter', mode: 'lines',
+      x: strip.t, y: strip.v, type: 'scatter', mode: 'lines',
       line: { color: uniform ? GOLD : BLUE, width: 2.5 }, hoverinfo: 'skip',
     },
     {
-      x: [strip.cursorPhi], y: [strip.cursorV], type: 'scatter', mode: 'markers',
+      x: [strip.cursorT], y: [strip.cursorV], type: 'scatter', mode: 'markers',
       marker: { color: '#FFFFFF', size: 9, line: { color: uniform ? GOLD : BLUE, width: 2 } },
       hoverinfo: 'skip',
     },
   ];
   const stripLayout = {
     showlegend: false,
-    margin: { l: 54, r: 14, t: 8, b: 40 },
-    xaxis: {
-      title: { text: 'loop position φ' }, range: [0, 1], autorange: false,
-      zeroline: false, tickfont: { size: 11 },
-    },
+    margin: { l: 54, r: 14, t: 8, b: 46 },
+    xaxis: xAxis(),
     yaxis: {
       title: { text: '|v| (px/s)' }, range: [0, strip.vMax * 1.15 || 1], autorange: false,
       zeroline: true, zerolinecolor: '#2A3442', tickfont: { size: 11 },
     },
-    shapes: [{
-      type: 'line', xref: 'x', yref: 'paper',
-      x0: strip.cursorPhi, x1: strip.cursorPhi, y0: 0, y1: 1,
-      line: { color: 'rgba(240,236,227,0.5)', width: 1, dash: 'dot' },
-    }],
+    shapes: [cursorShape],
+  };
+
+  // Companion chart: the two acceleration components vs time. a∥ (green) is the
+  // slope of the speed curve above; a⊥ (red, ≥ 0) is the centripetal part.
+  const aRange = Math.max(strip.aMax * 1.15, 1);
+  const accelTraces = [
+    {
+      x: strip.t, y: strip.aPar, type: 'scatter', mode: 'lines',
+      line: { color: GREEN, width: 2.5 }, hoverinfo: 'skip',
+    },
+    {
+      x: strip.t, y: strip.aPerp, type: 'scatter', mode: 'lines',
+      line: { color: RED, width: 2.5 }, hoverinfo: 'skip',
+    },
+    {
+      x: [strip.cursorT], y: [strip.cursorAPar], type: 'scatter', mode: 'markers',
+      marker: { color: '#FFFFFF', size: 8, line: { color: GREEN, width: 2 } }, hoverinfo: 'skip',
+    },
+    {
+      x: [strip.cursorT], y: [strip.cursorAPerp], type: 'scatter', mode: 'markers',
+      marker: { color: '#FFFFFF', size: 8, line: { color: RED, width: 2 } }, hoverinfo: 'skip',
+    },
+  ];
+  const accelLayout = {
+    showlegend: false,
+    margin: { l: 54, r: 14, t: 8, b: 46 },
+    xaxis: xAxis(),
+    yaxis: {
+      title: { text: 'a (px/s²)' }, range: [-aRange, aRange], autorange: false,
+      zeroline: true, zerolinecolor: '#2A3442', tickfont: { size: 11 },
+    },
+    shapes: [cursorShape],
   };
 
   return (
@@ -963,8 +1098,8 @@ function Sandbox() {
           {/* the counterintuitive-moment banner */}
           {centripetal && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md bg-usna-navy/85 border border-usna-gold text-usna-gold text-xs font-mono text-center pointer-events-none">
-              constant speed, yet |a| ≈ {fmt(readout.aMag)} — pointing sideways.
-              <br />that sideways arrow is centripetal: a = v²/r
+              Constant speed, yet |a| ≈ {fmt(readout.aMag)} and it points toward the center.
+              <br />This perpendicular acceleration is centripetal: a⊥ = v²/r
             </div>
           )}
           {/* the complementary inflection state — name it, don't hide it */}
@@ -973,21 +1108,32 @@ function Sandbox() {
               className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md bg-usna-navy/85 text-usna-text text-xs font-mono text-center pointer-events-none border"
               style={{ borderColor: BLUE }}
             >
-              inflection: the path straightens here — r → ∞, so a⊥ → 0.
-              <br />the osculating circle has flattened to a line.
+              Inflection: the path straightens here, so r → ∞ and a⊥ → 0.
+              <br />The osculating circle has flattened to a line.
             </div>
           )}
         </div>
 
-        {/* [EXPLAIN] |v| vs loop-position strip chart with a moving cursor */}
-        <div className="bg-usna-card border border-usna-grid rounded-lg p-3 min-w-0 overflow-hidden" style={{ height: 200 }}>
-          <div className="text-usna-muted text-xs mb-1 px-1">
-            Speed vs loop position — {uniform
-              ? 'flat: |v| constant, so a∥ (its slope) = 0.'
-              : 'a sinusoid: the SLOPE of this curve is a∥ (tangential acceleration).'}
+        {/* speed vs time, with a cursor tracking the particle */}
+        <div className="bg-usna-card border border-usna-grid rounded-lg p-3 min-w-0 overflow-hidden" style={{ height: 214 }}>
+          <div className="text-usna-muted text-xs mb-1 px-1 truncate">
+            Speed vs time. {uniform
+              ? 'Flat line: constant speed, so a∥ (its slope) is zero.'
+              : 'The slope of this curve is a∥, the tangential acceleration.'}
           </div>
-          <div style={{ height: 160 }}>
+          <div style={{ height: 172 }}>
             <IntensityPlot traces={stripTraces} layoutOverrides={stripLayout} />
+          </div>
+        </div>
+
+        {/* companion: acceleration components vs time (a∥ green, a⊥ red) */}
+        <div className="bg-usna-card border border-usna-grid rounded-lg p-3 min-w-0 overflow-hidden" style={{ height: 214 }}>
+          <div className="text-usna-muted text-xs mb-1 px-1 truncate">
+            Acceleration vs time. <span style={{ color: GREEN }}>a∥</span> is the slope of the speed
+            curve above; <span style={{ color: RED }}>a⊥</span> is centripetal, largest at the tightest bend.
+          </div>
+          <div style={{ height: 172 }}>
+            <IntensityPlot traces={accelTraces} layoutOverrides={accelLayout} />
           </div>
         </div>
 
@@ -1003,8 +1149,12 @@ function Sandbox() {
 }
 
 const INFO = {
-  title: 'Velocity is tangent; acceleration turns you',
+  title: 'Velocity points along the path; acceleration turns it',
   description:
-    'The velocity arrow always points along the path (tangent). Acceleration is the change in the velocity VECTOR — so on a curve it is nonzero even at constant speed, and it points toward the inside of the bend. Switch the speed profile to "Uniform": the tangential (green) component collapses to zero, but the normal/red arrow — the centripetal acceleration — stays large and aims straight at the center of the osculating circle. Constant speed does not mean no acceleration. Color the path by curvature κ=1/r and the tightest bend glows red — exactly where a⊥ peaks, since a⊥ = κv². Snap to the figure-8 and ride through the center: the path straightens, r → ∞, and a⊥ collapses to zero and flips sign. The |v|-vs-φ strip chart below makes a∥ visible as a slope: flat under Uniform, a sinusoid under Speeding-up. This is the L7 result, three lessons early: a curved trajectory demands a sideways force, and its size is v²/r.',
-  equation: String.raw`\vec a = \underbrace{\tfrac{d|\vec v|}{dt}\,\hat T}_{\text{tangential}} + \underbrace{\tfrac{|\vec v|^2}{r}\,\hat N}_{\text{centripetal}}, \qquad \kappa = \tfrac{1}{r}`,
+    'Velocity is the time derivative of position, so the velocity arrow always points along the path. Acceleration is the time derivative of the velocity vector. On a curved path the acceleration is nonzero even when the speed is constant, and it points toward the inside of the bend. It separates into a tangential part (green), equal to the rate of change of speed, and a perpendicular part (red) that turns the velocity toward the center of the curve. Under the Uniform speed profile the tangential part vanishes while the perpendicular part remains, so constant speed does not mean zero acceleration. The perpendicular part has magnitude v²/r, where r is the instantaneous radius of curvature drawn by the osculating circle. Coloring the path by curvature κ = 1/r marks the tightest bend, which is where the perpendicular acceleration is largest. On the figure-8 the path straightens at the center, so r grows without bound and the perpendicular acceleration falls to zero and reverses. The speed-versus-time chart shows the tangential acceleration as a slope: flat under Uniform, sinusoidal under Speeding-up.',
+  equation: String.raw`\begin{aligned}
+    &\vec v = \frac{d\vec r}{dt}, \qquad \vec a = \frac{d\vec v}{dt} = \vec a_\parallel + \vec a_\perp \\[4pt]
+    &a_\parallel = \frac{d\lvert\vec v\rvert}{dt}\ \text{(changes speed)}, \qquad
+      a_\perp = \frac{\lvert\vec v\rvert^{2}}{r}\ \text{(turns)}
+  \end{aligned}`,
 };

@@ -123,16 +123,8 @@ function GrapherView({ mode }) {
     return integrate(p.x0, p.v0, p.accel);
   }, [isForce, force, mass, release, preset]);
 
-  // Play: advance the scrub line at ~16 fps and loop.
-  const playRef = useRef();
-  useEffect(() => {
-    if (!playing) return;
-    const step = T / 90; // ~6 s to sweep the window
-    playRef.current = setInterval(() => {
-      setScrub((s) => (s >= T ? 0 : Math.min(T, s + step)));
-    }, 66);
-    return () => clearInterval(playRef.current);
-  }, [playing]);
+  // Play is driven by CartTrack's own rAF clock (onTick, below) so the cart
+  // animates at the display frame rate; the plot cursor is synced at ~20 fps.
 
   // Sample the motion at the scrub time.
   const idx = Math.max(0, Math.min(N - 1, Math.round((scrub / T) * (N - 1))));
@@ -351,15 +343,28 @@ function GrapherView({ mode }) {
         <CartTrack
           motion={motion}
           pinned={pinned}
-          idx={idx}
-          now={now}
+          scrub={scrub}
+          playing={playing}
           xRange={xRange}
+          onTick={(t) => setScrub(t)}
           onScrubToX={(targetX) => {
-            // inverse lookup: find the sample whose x is nearest targetX
-            let best = 0, bestD = Infinity;
+            // Inverse lookup with branch disambiguation. A single x can occur at
+            // two times (e.g. "Up and back" — outbound and return), so nearest-x
+            // alone jumps between legs. Instead: find the closest x, then among
+            // all samples within a small band of it, pick the one nearest in
+            // TIME to the current scrub. Dragging then tracks one continuous leg.
+            let dmin = Infinity;
             for (let i = 0; i < N; i++) {
               const d = Math.abs(motion.x[i] - targetX);
-              if (d < bestD) { bestD = d; best = i; }
+              if (d < dmin) dmin = d;
+            }
+            const band = 0.04 * ((xRange[1] - xRange[0]) || 1);
+            let best = 0, bestDT = Infinity;
+            for (let i = 0; i < N; i++) {
+              if (Math.abs(motion.x[i] - targetX) <= dmin + band) {
+                const dt = Math.abs(motion.t[i] - now.t);
+                if (dt < bestDT) { bestDT = dt; best = i; }
+              }
             }
             setPlaying(false);
             setScrub(motion.t[best]);
@@ -383,15 +388,26 @@ function GrapherView({ mode }) {
  * cart is draggable: dragging maps pointer-x back to a world x and asks the
  * parent to inverse-lookup the nearest time (bidirectional scrub).
  */
-function CartTrack({ motion, pinned, idx, now, xRange, onScrubToX }) {
+function CartTrack({ motion, pinned, scrub, playing, xRange, onTick, onScrubToX }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
-  const stateRef = useRef({ motion, pinned, idx, now, xRange, onScrubToX });
+  const stateRef = useRef({ motion, pinned, scrub, playing, xRange, onTick, onScrubToX });
   const draggingRef = useRef(false);
-  const sizeRef = useRef({ w: 600, h: 120 });
+  const clockRef = useRef(scrub);           // smooth display time (s)
+  const sizeRef = useRef({ w: 600, h: 158 });
 
   // keep the latest props in a ref so the rAF/pointer handlers stay stable
-  stateRef.current = { motion, pinned, idx, now, xRange, onScrubToX };
+  stateRef.current = { motion, pinned, scrub, playing, xRange, onTick, onScrubToX };
+
+  // Linear interpolation of a motion array at time t — the cart reads this each
+  // frame off a continuous clock, so it glides between the N samples instead of
+  // snapping to whichever sample the (throttled) scrub state last landed on.
+  const sampleAt = (arr, t) => {
+    const f = Math.max(0, Math.min(N - 1, (t / T) * (N - 1)));
+    const i = Math.floor(f);
+    if (i >= N - 1) return arr[N - 1];
+    return arr[i] + (arr[i + 1] - arr[i]) * (f - i);
+  };
 
   // world-x → screen-x px, with padding so the cart body never clips the edge
   const PAD = 46;
@@ -414,11 +430,36 @@ function CartTrack({ motion, pinned, idx, now, xRange, onScrubToX }) {
 
     let ctx = setupCanvas(canvas, sizeRef.current.w, sizeRef.current.h);
     let raf = 0;
+    const SPEED = T / 6;   // window sweep time ≈ 6 s
+    let lastTs = 0, syncAcc = 0;
 
-    const draw = () => {
+    const draw = (ts) => {
+      const st = stateRef.current;
+      const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0;
+      lastTs = ts;
+
+      // Advance the smooth clock while playing (and not being dragged); otherwise
+      // follow the parent scrub. Sync the plot cursor at ~20 fps via onTick.
+      if (st.playing && !draggingRef.current) {
+        let t = clockRef.current + dt * SPEED;
+        if (t >= T) t = 0;
+        clockRef.current = t;
+        syncAcc += dt;
+        if (syncAcc >= 0.05) { syncAcc = 0; st.onTick(t); }
+      } else {
+        clockRef.current = st.scrub;
+      }
+      const ct = clockRef.current;
+      // interpolated live state at the clock time
+      const n = {
+        x: sampleAt(st.motion.x, ct),
+        v: sampleAt(st.motion.v, ct),
+        a: sampleAt(st.motion.a, ct),
+      };
+
       const { w, h } = sizeRef.current;
-      const { now: n, xRange: xr, motion: m, pinned: p } = stateRef.current;
-      const trackY = h * 0.62;
+      const { xRange: xr, motion: m, pinned: p } = st;
+      const trackY = h * 0.66;
 
       ctx.clearRect(0, 0, w, h);
       // backdrop
@@ -465,7 +506,7 @@ function CartTrack({ motion, pinned, idx, now, xRange, onScrubToX }) {
 
       // ── pinned ghost cart ──
       if (p) {
-        const gx = worldToPx(p.x[stateRef.current.idx], w);
+        const gx = worldToPx(sampleAt(p.x, ct), w);
         ctx.fillStyle = 'rgba(197,183,131,0.22)';
         roundRect(ctx, gx - 20, trackY - 30, 40, 24, 5);
         ctx.fill();
@@ -498,20 +539,24 @@ function CartTrack({ motion, pinned, idx, now, xRange, onScrubToX }) {
         if (Math.abs(m.a[i]) > aMax) aMax = Math.abs(m.a[i]);
       }
       const ARROW_MAX = 78; // px
-      const vArrowY = bodyTop - 12;
-      const aArrowY = bodyTop - 30;
-      // velocity arrow (blue) — anchored above the cart
-      drawArrow(ctx, {
-        x: cx, y: vArrowY, dx: (n.v / vMax) * ARROW_MAX, dy: 0,
-        color: BLUE, width: 4, head: 9,
-        label: `v = ${n.v.toFixed(1)}`,
-      });
-      // acceleration arrow (green) — above the velocity arrow
-      drawArrow(ctx, {
-        x: cx, y: aArrowY, dx: (n.a / aMax) * ARROW_MAX, dy: 0,
-        color: GREEN, width: 4, head: 9,
-        label: `a = ${n.a.toFixed(1)}`,
-      });
+      const vArrowY = bodyTop - 22;
+      const aArrowY = bodyTop - 50;
+      // Draw an arrow, then its label BELOW the shaft (so the arrowhead never
+      // overlaps the text) centered under the tip and clamped inside the strip.
+      const labeledArrow = (y, val, mag, color, sym) => {
+        const dx = mag > 1e-9 ? (val / mag) * ARROW_MAX : 0;
+        drawArrow(ctx, { x: cx, y, dx, dy: 0, color, width: 4, head: 9 });
+        const tipX = cx + dx;
+        const lx = Math.max(PAD + 2, Math.min(w - PAD - 2, tipX));
+        ctx.font = '13px JetBrains Mono, monospace';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`${sym} = ${val.toFixed(1)}`, lx, y + 5);
+      };
+      // acceleration (green, top) then velocity (blue, below it)
+      labeledArrow(aArrowY, n.a, aMax, GREEN, 'a');
+      labeledArrow(vArrowY, n.v, vMax, BLUE, 'v');
 
       // "drag me" hint / grab affordance below the cart
       ctx.fillStyle = draggingRef.current ? GOLD : MUTED;
@@ -575,7 +620,7 @@ function CartTrack({ motion, pinned, idx, now, xRange, onScrubToX }) {
     <div
       ref={wrapRef}
       className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden"
-      style={{ height: 120 }}
+      style={{ height: 158 }}
     >
       <canvas
         ref={canvasRef}
