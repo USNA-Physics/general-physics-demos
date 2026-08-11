@@ -46,7 +46,9 @@ const GREEN = '#7FB77E';
 const MUTED = '#8B8C8E';
 
 export default function FreeFall({ mode = 'default' }) {
-  if (mode === 'projectile') return <ProjectileMode />;
+  // Projectile (D06) is 2D motion and now lives under Chapter 3 as its own demo
+  // (ch03-motion-2d/Projectile), which re-exports ProjectileMode below. Free Fall
+  // keeps the 1D views: default (L2) and drag (D12, L12).
   if (mode === 'drag') return <DragMode />;
   return mode === 'default' ? <FreeFallExplorer /> : <DemoStub mode={mode} />;
 }
@@ -329,7 +331,7 @@ function projTrajectoryDrag(v0, angleDeg, h0, k = PROJ_DRAG_K) {
 
 const PROJ_DEFAULTS = { v0: 30, angle: 45, h0: 0 };
 
-function ProjectileMode() {
+export function ProjectileMode() {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
 

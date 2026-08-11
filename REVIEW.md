@@ -15,7 +15,7 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L2 | D02 · Free Fall Explorer | `ch02-motion-1d/free-fall` | ✅ |
 | L4 | D04 · 2D Vector Kinematics | `ch03-motion-2d/vectors` | ⬜ |
 | L5 | D05 · Relative Motion | `ch03-motion-2d/relative` | ⬜ |
-| L6 | D06 · Projectile (Free Fall mode) | `…/free-fall?mode=projectile` | ⬜ |
+| L6 | D06 · Projectile Motion | `ch03-motion-2d/projectile` (moved out of Ch2) | ⬜ |
 | L7, L13 | D07 · UCM Visualizer | `ch03-motion-2d/ucm` · kinematic/banked | ⬜ |
 | L9, L10 | D09 · Free-Body Diagram Builder | `ch04-newton/fbd` · fbd/pairs | ⬜ |
 | L11 | D11 · Friction Incline | `ch05-applications/friction` | ⬜ |

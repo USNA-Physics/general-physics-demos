@@ -47,7 +47,6 @@ const courses = [
             status: 'built',
             modes: [
               { slug: 'default', label: 'Free fall (L2)' },
-              { slug: 'projectile', label: 'Projectile · D06 (L6)' },
               { slug: 'drag', label: 'Drag · D12 (L12)' },
             ],
             component: lazy(() => import('./courses/sp211/ch02-motion-1d/FreeFall')),
@@ -93,6 +92,16 @@ const courses = [
             due: 'Aug 19',
             status: 'built',
             component: lazy(() => import('./courses/sp211/ch03-motion-2d/RelativeMotion')),
+          },
+          {
+            slug: 'projectile',
+            dLabel: 'D06',
+            title: 'Projectile Motion',
+            description: 'Launch angle, speed, and height feed a live 2D trajectory. Hold arcs to overlay angles, drag a ground target to hit, and a range-vs-angle subplot traces the sin(2θ) curve as you fire. A drag toggle bends the arc and repeals the complementary-angle tie.',
+            moment: 'Fire 30° and 60° at the same speed and they land together — until air drag is switched on and the tie breaks.',
+            due: 'Aug 20',
+            status: 'built',
+            component: lazy(() => import('./courses/sp211/ch03-motion-2d/Projectile')),
           },
           {
             slug: 'ucm',
@@ -415,7 +424,7 @@ const courses = [
       { n: 3, topic: 'Integration, kinematics', chapter: 'ch02-motion-1d', experiment: 'grapher', mode: 'area', dLabel: 'D01' },
       { n: 4, topic: '2D kinematics', chapter: 'ch03-motion-2d', experiment: 'vectors', mode: 'default', dLabel: 'D04' },
       { n: 5, topic: 'Relative motion', chapter: 'ch03-motion-2d', experiment: 'relative', mode: 'default', dLabel: 'D05' },
-      { n: 6, topic: 'Projectile motion', chapter: 'ch02-motion-1d', experiment: 'free-fall', mode: 'projectile', dLabel: 'D06' },
+      { n: 6, topic: 'Projectile motion', chapter: 'ch03-motion-2d', experiment: 'projectile', mode: 'default', dLabel: 'D06' },
       { n: 7, topic: 'Circular motion', chapter: 'ch03-motion-2d', experiment: 'ucm', mode: 'kinematic', dLabel: 'D07' },
       { n: 8, topic: 'Newton\'s 1st / 2nd', chapter: 'ch02-motion-1d', experiment: 'grapher', mode: 'force', dLabel: 'D01' },
       { n: 9, topic: 'Contact forces, FBDs', chapter: 'ch04-newton', experiment: 'fbd', mode: 'fbd', dLabel: 'D09' },
