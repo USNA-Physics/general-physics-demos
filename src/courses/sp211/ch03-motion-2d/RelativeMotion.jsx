@@ -66,6 +66,12 @@ const RIVER_W_DEFAULT = 80; // m, bank-to-bank
 
 const DEG = Math.PI / 180;
 
+// Deterministic pseudo-random in [0,1) — spreads burst particles without state.
+function hash(n) {
+  const x = Math.sin(n * 127.1 + 11.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 // Pick a "nice" grid step (1, 2, or 5 × 10^k) so axis ticks land on round metres.
 function niceStep(range, target = 6) {
   const raw = Math.max(1e-6, range / target);
@@ -197,6 +203,12 @@ export default function RelativeMotion({ mode = 'default' }) {
   // per frame. We publish a throttled copy to state for the live progress bar.
   const progRef = useRef(0);
   const [progress, setProgress] = useState(0);
+
+  // Collision effects: short particle bursts spawned when the boat physically
+  // reaches the buoy or the dock. Frame-independent (detected in ground coords),
+  // fired at most once per crossing via hitStateRef.
+  const fxRef = useRef([]);
+  const hitStateRef = useRef({ buoy: false, dock: false });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -444,6 +456,52 @@ export default function RelativeMotion({ mode = 'default' }) {
         hitRef.current = { boatX, boatY, tipX, tipY };
       }
 
+      // ---- collision bursts (anchored to the ground-fixed hit point) ----
+      for (const fxb of fxRef.current) {
+        const age = (now - fxb.t0) / 1000;
+        if (age < 0 || age > fxb.dur) continue;
+        const a = scr(fxb.x, fxb.y);
+        const f = age / fxb.dur; // 0 → 1
+        const fade = Math.max(0, 1 - f);
+        if (fxb.kind === 'dock') {
+          // expanding gold ring + confetti fountain + "DOCKED!" pop
+          ctx.strokeStyle = `rgba(197,183,131,${fade * 0.8})`;
+          ctx.lineWidth = 3 * fade + 1;
+          ctx.beginPath(); ctx.arc(a.x, a.y, 8 + f * 48, 0, 2 * Math.PI); ctx.stroke();
+          for (let i = 0; i < 20; i++) {
+            const ang = -Math.PI / 2 + (hash(i) - 0.5) * 1.5;
+            const spd = 70 + hash(i + 99) * 100;
+            const px = a.x + Math.cos(ang) * spd * age;
+            const py = a.y + Math.sin(ang) * spd * age + 150 * age * age; // gravity
+            ctx.globalAlpha = fade;
+            ctx.fillStyle = i % 3 === 0 ? GOLD : (i % 3 === 1 ? CURRENT : BLUE);
+            ctx.fillRect(px - 2, py - 2, 4, 4);
+          }
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = `rgba(197,183,131,${fade})`;
+          ctx.font = `bold ${17 + fade * 6}px JetBrains Mono, monospace`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText('DOCKED!', a.x, a.y - 18 - f * 12);
+        } else {
+          // buoy splash: expanding water ring + droplets + "BONK!"
+          ctx.strokeStyle = `rgba(200,225,255,${fade * 0.85})`;
+          ctx.lineWidth = 2.5 * fade + 0.5;
+          ctx.beginPath(); ctx.arc(a.x, a.y, 4 + f * 32, 0, 2 * Math.PI); ctx.stroke();
+          for (let i = 0; i < 12; i++) {
+            const ang = -Math.PI / 2 + (hash(i) - 0.5) * 1.7;
+            const spd = 50 + hash(i + 50) * 80;
+            const px = a.x + Math.cos(ang) * spd * age;
+            const py = a.y + Math.sin(ang) * spd * age + 170 * age * age;
+            ctx.fillStyle = `rgba(185,218,248,${fade})`;
+            ctx.beginPath(); ctx.arc(px, py, 2.4 * (1 - 0.5 * f), 0, 2 * Math.PI); ctx.fill();
+          }
+          ctx.fillStyle = `rgba(226,125,96,${fade})`;
+          ctx.font = 'bold 13px JetBrains Mono, monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText('BONK!', a.x, a.y - 24 - f * 8);
+        }
+      }
+
       // ---- pane label ----
       ctx.font = '11px JetBrains Mono, monospace';
       ctx.textAlign = 'left';
@@ -474,9 +532,33 @@ export default function RelativeMotion({ mode = 'default' }) {
       if (playingRef.current && !draggingRef.current && Number.isFinite(s.crossingTime)) {
         const speedup = 6 / s.crossingTime;
         progRef.current += dt * speedup;
-        if (progRef.current >= 1) progRef.current = 0;
+        if (progRef.current >= 1) {
+          progRef.current = 0;
+          hitStateRef.current = { buoy: false, dock: false }; // arm for the next lap
+        }
       }
       const p = progRef.current;
+
+      // ---- collision detection (physical, so done in ground coordinates) ----
+      if (Number.isFinite(s.crossingTime)) {
+        const tt = p * s.crossingTime;
+        const gx = s.bg.x * tt, gy = s.bg.y * tt;      // boat ground position
+        const rw = s.riverW;
+        const hs = hitStateRef.current;
+        const buoyR = Math.max(2.5, rw * 0.05);
+        if (!hs.buoy && Math.hypot(gx - rw * 0.32, gy - rw * 0.55) < buoyR) {
+          hs.buoy = true;
+          fxRef.current.push({ x: rw * 0.32, y: rw * 0.55, t0: now, dur: 1.0, kind: 'buoy' });
+        }
+        if (!hs.dock && p >= 0.985 && Math.abs(s.drift) < 3) {
+          hs.dock = true;
+          fxRef.current.push({ x: 0, y: rw, t0: now, dur: 1.4, kind: 'dock' });
+        }
+      }
+      // prune finished bursts
+      if (fxRef.current.length) {
+        fxRef.current = fxRef.current.filter((b) => (now - b.t0) / 1000 <= b.dur);
+      }
 
       ctx.clearRect(0, 0, W, H);
       hitRef.current = null; // recomputed by the interactive pane each frame
@@ -574,6 +656,8 @@ export default function RelativeMotion({ mode = 'default' }) {
   useEffect(() => {
     progRef.current = 0;
     setProgress(0);
+    hitStateRef.current = { buoy: false, dock: false };
+    fxRef.current = [];
   }, [boatSpeed, heading, current, currentDir, riverW]);
 
   // ── formatted readouts ──────────────────────────────────────────────────────

@@ -331,6 +331,20 @@ function projTrajectoryDrag(v0, angleDeg, h0, k = PROJ_DRAG_K) {
 
 const PROJ_DEFAULTS = { v0: 30, angle: 45, h0: 0 };
 
+// Deterministic pseudo-random in [0,1) — spreads burst particles without state.
+function projHash(n) {
+  const x = Math.sin(n * 127.1 + 11.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+// Game-mode scoring bands: landing within r metres of the target centre. The
+// first band whose radius the shot falls inside sets the score.
+const BANDS = [
+  { name: 'Bullseye', r: 1.0, pts: 100, color: '#C5B783' },
+  { name: 'Inner', r: 2.0, pts: 60, color: '#7FB77E' },
+  { name: 'Hit', r: 3.0, pts: 30, color: '#5B9BD5' },
+];
+
 export function ProjectileMode() {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
@@ -354,10 +368,16 @@ export function ProjectileMode() {
   const sweepRef = useRef(null);
   // Flight animation clock for the moving shell (loops).
   const flightRef = useRef(0);
+  // Fire bursts: short particle effects at the landing spot (hit → confetti).
+  const fxRef = useRef([]);
+  // Game mode: randomized target rounds, bullseye bands, points.
+  const [gameMode, setGameMode] = useState(false);
+  const [game, setGame] = useState({ points: 0, rounds: 0, best: 0, lastDist: null, lastBand: null });
+  const firedRef = useRef(null); // the frozen shot animating toward the target
 
   // Live params are read inside the rAF loop through refs (no per-frame re-render).
-  const liveRef = useRef({ v0, angle, h0, held, drag, targetX });
-  liveRef.current = { v0, angle, h0, held, drag, targetX };
+  const liveRef = useRef({ v0, angle, h0, held, drag, targetX, gameMode });
+  liveRef.current = { v0, angle, h0, held, drag, targetX, gameMode };
 
   // Live trajectory: vacuum always; the drag arc is computed only when needed.
   const live = useMemo(() => projTrajectory(v0, angle, h0), [v0, angle, h0]);
@@ -381,6 +401,26 @@ export function ProjectileMode() {
     setHeld((h) => [...h, { v0, angle, h0, drag, color: HELD_COLORS[h.length % HELD_COLORS.length] }]);
   };
 
+  // ── game mode ──────────────────────────────────────────────────────────────
+  const classify = (dist) => BANDS.find((b) => dist <= b.r) || null;
+  // Randomize a fresh round: a reachable target distance and a varied launch
+  // height. The distance stays within flat-ground max range for the current
+  // speed, so every setup is hittable with the right angle.
+  const newRound = () => {
+    const rmax = (v0 * v0) / G;
+    setTargetX(Math.max(8, Math.round((0.3 + Math.random() * 0.55) * rmax)));
+    setH0(Math.random() < 0.5 ? 0 : Math.round(2 + Math.random() * 16));
+    firedRef.current = null;
+    setLastResult(null);
+  };
+  const startGame = () => {
+    setGameMode(true);
+    setGame({ points: 0, rounds: 0, best: 0, lastDist: null, lastBand: null });
+    setHeld([]); setShots([]); setDrag(false); setSweeping(false);
+    newRound();
+  };
+  const exitGame = () => { setGameMode(false); firedRef.current = null; setLastResult(null); };
+
   // Fire: record the shot for the empirical range(θ) plot + score against target.
   const fire = () => {
     const r = activeRange;
@@ -389,9 +429,26 @@ export function ProjectileMode() {
       if (exists) return s;
       return [...s, { angle, range: r, v0, h0, drag }];
     });
-    const hit = Math.abs(r - targetX) <= TARGET_HALF;
-    setScore((sc) => ({ hits: sc.hits + (hit ? 1 : 0), shots: sc.shots + 1 }));
-    setLastResult(hit ? 'hit' : 'miss');
+    const dist = Math.abs(r - targetX);
+    if (gameMode) {
+      // score by distance-from-centre band; animate a single shot to the target
+      const band = classify(dist);
+      const pts = band ? band.pts : 0;
+      setGame((g) => {
+        const points = g.points + pts;
+        return { points, rounds: g.rounds + 1, best: Math.max(g.best, points), lastDist: dist, lastBand: band ? band.name : 'Miss' };
+      });
+      setLastResult(band ? 'hit' : 'miss');
+      const prim = drag ? (liveDrag || live) : live;
+      firedRef.current = { t0: performance.now(), xs: prim.xs, ys: prim.ys, tF: prim.tF, x: r, band, bursted: false };
+    } else {
+      const hit = dist <= TARGET_HALF;
+      setScore((sc) => ({ hits: sc.hits + (hit ? 1 : 0), shots: sc.shots + 1 }));
+      setLastResult(hit ? 'hit' : 'miss');
+      // spawn a landing burst at the impact point (confetti on a hit, dust on a miss)
+      fxRef.current.push({ x: hit ? targetX : r, t0: performance.now(), dur: hit ? 1.4 : 0.7, hit });
+      if (fxRef.current.length > 6) fxRef.current.shift();
+    }
   };
 
   // Sweep & auto-fire: walk the angle 0→90° in steps, firing a shot at each so
@@ -478,7 +535,7 @@ export function ProjectileMode() {
       lastNow = now;
       if (!(dt > 0) || dt > 0.1) dt = 1 / 60;
 
-      const { v0: lv, angle: la, h0: lh, held: lheld, drag: ld, targetX: tx } = liveRef.current;
+      const { v0: lv, angle: la, h0: lh, held: lheld, drag: ld, targetX: tx, gameMode: gm } = liveRef.current;
       const liveT = projTrajectory(lv, la, lh);
       const liveD = ld ? projTrajectoryDrag(lv, la, lh) : null;
 
@@ -507,19 +564,40 @@ export function ProjectileMode() {
         ctx.fillText(String(Math.round(m)), toX(m), groundY + 15);
       }
 
-      // draggable ground target (hoop): a ring sitting on the ground line
+      // draggable ground target
       const txp = toX(tx);
-      ctx.strokeStyle = hexAlpha('#D08770', 0.9);
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.ellipse(txp, groundY, TARGET_HALF * scX, 6, 0, 0, 2 * Math.PI);
-      ctx.stroke();
-      // hit-zone shading
-      ctx.fillStyle = hexAlpha('#D08770', 0.16);
-      ctx.fillRect(toX(tx - TARGET_HALF), groundY - 26, 2 * TARGET_HALF * scX, 26);
-      ctx.fillStyle = hexAlpha('#D08770', 0.95);
-      ctx.textAlign = 'center';
-      ctx.fillText('🎯', txp, groundY - 14);
+      if (gm) {
+        // bullseye: concentric scoring bands (outer → inner) on the ground line
+        for (let i = BANDS.length - 1; i >= 0; i--) {
+          const bd = BANDS[i];
+          ctx.fillStyle = hexAlpha(bd.color, 0.14);
+          ctx.fillRect(toX(tx - bd.r), groundY - 32, 2 * bd.r * scX, 32);
+          ctx.strokeStyle = hexAlpha(bd.color, 0.85);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(txp, groundY, bd.r * scX, 5, 0, 0, 2 * Math.PI);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = hexAlpha('#C5B783', 0.9);
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(txp, groundY - 32); ctx.lineTo(txp, groundY); ctx.stroke();
+        ctx.fillStyle = hexAlpha('#C5B783', 0.95);
+        ctx.textAlign = 'center';
+        ctx.font = '13px JetBrains Mono, monospace';
+        ctx.fillText('🎯', txp, groundY - 36);
+      } else {
+        // analysis mode: a single hoop with a ±3 m hit zone
+        ctx.strokeStyle = hexAlpha('#D08770', 0.9);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(txp, groundY, TARGET_HALF * scX, 6, 0, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.fillStyle = hexAlpha('#D08770', 0.16);
+        ctx.fillRect(toX(tx - TARGET_HALF), groundY - 26, 2 * TARGET_HALF * scX, 26);
+        ctx.fillStyle = hexAlpha('#D08770', 0.95);
+        ctx.textAlign = 'center';
+        ctx.fillText('🎯', txp, groundY - 14);
+      }
 
       // launch platform (if h0 > 0)
       if (lh > 0.01) {
@@ -532,7 +610,7 @@ export function ProjectileMode() {
       }
 
       // faded complementary twin (90−θ) — only meaningful from ground level
-      if (lh < 0.5 && la > 0.5 && la < 89.5 && Math.abs(la - 45) > 0.5) {
+      if (!gm && lh < 0.5 && la > 0.5 && la < 89.5 && Math.abs(la - 45) > 0.5) {
         const twin = projTrajectory(lv, 90 - la, lh);
         strokeArc(twin, hexAlpha(BLUE, 0.45), 1.8, [3, 4]);
         ctx.fillStyle = hexAlpha(BLUE, 0.6);
@@ -560,9 +638,26 @@ export function ProjectileMode() {
         ctx.fill();
       }
 
-      // live arc (drag arc if drag on, else vacuum)
+      // live arc: solid in analysis mode; in game mode a dotted guide that only
+      // traces the first part of the flight, so you line up the shot without the
+      // exact landing being given away.
       const primary = ld ? liveD : liveT;
-      strokeArc(primary, GOLD, 2.6);
+      if (gm) {
+        const n = primary.xs.length;
+        const upto = Math.max(1, Math.floor(n * 0.62));
+        ctx.strokeStyle = hexAlpha(GOLD, 0.55);
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([2, 5]);
+        ctx.beginPath();
+        for (let i = 0; i <= upto; i++) {
+          const X = toX(primary.xs[i]), Y = toY(primary.ys[i]);
+          if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        strokeArc(primary, GOLD, 2.6);
+      }
 
       // launch velocity decomposition: v, v_x, v_y arrows at the origin
       const th = (la * Math.PI) / 180;
@@ -576,24 +671,16 @@ export function ProjectileMode() {
       drawArrow(ctx, { x: oX, y: oY, dx: 0, dy: -vyPix, color: hexAlpha(GREEN, 0.9), width: 2, label: 'v_y', head: 8 });
       drawArrow(ctx, { x: oX, y: oY, dx: vxPix, dy: -vyPix, color: GOLD, width: 2.4, label: 'v₀', head: 10 });
 
-      // live landing dot (primary)
-      ctx.fillStyle = GOLD;
-      ctx.beginPath();
-      ctx.arc(toX(primary.range), toY(0), 4, 0, 2 * Math.PI);
-      ctx.fill();
+      // live landing dot (primary) — hidden in game mode (that is the challenge)
+      if (!gm) {
+        ctx.fillStyle = GOLD;
+        ctx.beginPath();
+        ctx.arc(toX(primary.range), toY(0), 4, 0, 2 * Math.PI);
+        ctx.fill();
+      }
 
-      // flying shell along the primary arc (loops with a short pause)
-      flightRef.current += dt;
-      const period = primary.tF + 0.5;
-      const phase = flightRef.current % period;
-      if (phase <= primary.tF && primary.tF > 0) {
-        // interpolate position along the sampled arc by time fraction
-        const frac = primary.tF > 0 ? phase / primary.tF : 0;
-        const fi = frac * (primary.xs.length - 1);
-        const i0 = Math.floor(fi), i1 = Math.min(primary.xs.length - 1, i0 + 1);
-        const w = fi - i0;
-        const sxw = primary.xs[i0] + w * (primary.xs[i1] - primary.xs[i0]);
-        const syw = primary.ys[i0] + w * (primary.ys[i1] - primary.ys[i0]);
+      // Draw a shell in flight.
+      const drawShell = (sxw, syw) => {
         ctx.fillStyle = '#FFFFFF';
         ctx.shadowColor = GOLD;
         ctx.shadowBlur = 12;
@@ -601,6 +688,77 @@ export function ProjectileMode() {
         ctx.arc(toX(sxw), toY(syw), 5, 0, 2 * Math.PI);
         ctx.fill();
         ctx.shadowBlur = 0;
+      };
+      const sampleArc = (xs, ys, frac) => {
+        const fi = frac * (xs.length - 1);
+        const i0 = Math.floor(fi), i1 = Math.min(xs.length - 1, i0 + 1), w = fi - i0;
+        return [xs[i0] + w * (xs[i1] - xs[i0]), ys[i0] + w * (ys[i1] - ys[i0])];
+      };
+
+      if (!gm) {
+        // analysis mode: shell loops along the primary arc as a preview
+        flightRef.current += dt;
+        const period = primary.tF + 0.5;
+        const phase = flightRef.current % period;
+        if (phase <= primary.tF && primary.tF > 0) {
+          const [sxw, syw] = sampleArc(primary.xs, primary.ys, phase / primary.tF);
+          drawShell(sxw, syw);
+        }
+      } else if (firedRef.current) {
+        // game mode: animate the frozen shot once; burst on landing
+        const shot = firedRef.current;
+        const st = (now - shot.t0) / 1000;
+        if (shot.tF > 0 && st <= shot.tF) {
+          const [sxw, syw] = sampleArc(shot.xs, shot.ys, st / shot.tF);
+          drawShell(sxw, syw);
+        } else if (!shot.bursted) {
+          shot.bursted = true;
+          fxRef.current.push({ x: shot.x, t0: now, dur: shot.band ? 1.5 : 0.7, hit: !!shot.band, band: shot.band });
+        }
+      }
+
+      // ---- landing bursts: hit → gold confetti + "HIT!", miss → dust puff ----
+      if (fxRef.current.length) {
+        fxRef.current = fxRef.current.filter((b) => (now - b.t0) / 1000 <= b.dur);
+      }
+      for (const b of fxRef.current) {
+        const age = (now - b.t0) / 1000;
+        const ax = toX(b.x), ay = groundY;
+        const f = age / b.dur, fade = Math.max(0, 1 - f);
+        if (b.hit) {
+          ctx.strokeStyle = hexAlpha(GOLD, fade * 0.85);
+          ctx.lineWidth = 3 * fade + 1;
+          ctx.beginPath(); ctx.arc(ax, ay, 6 + f * 48, 0, Math.PI, true); ctx.stroke();
+          for (let i = 0; i < 22; i++) {
+            const angp = -Math.PI / 2 + (projHash(i) - 0.5) * 1.7;
+            const spd = 70 + projHash(i + 31) * 110;
+            const px = ax + Math.cos(angp) * spd * age;
+            const py = ay + Math.sin(angp) * spd * age + 150 * age * age; // gravity
+            if (py > ay + 1) continue; // stay above the ground line
+            ctx.globalAlpha = fade;
+            ctx.fillStyle = i % 3 === 0 ? GOLD : (i % 3 === 1 ? GREEN : BLUE);
+            ctx.fillRect(px - 2, py - 2, 4, 4);
+          }
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = hexAlpha(b.band ? b.band.color : GOLD, fade);
+          ctx.font = `bold ${18 + fade * 6}px JetBrains Mono, monospace`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(b.band ? `${b.band.name.toUpperCase()}!  +${b.band.pts}` : 'HIT!', ax, ay - 30 - f * 14);
+        } else {
+          for (let i = 0; i < 10; i++) {
+            const angp = -Math.PI / 2 + (projHash(i) - 0.5) * 2.2;
+            const spd = 30 + projHash(i + 7) * 45;
+            const px = ax + Math.cos(angp) * spd * age;
+            const py = ay + Math.sin(angp) * spd * age + 120 * age * age;
+            if (py > ay + 1) continue;
+            ctx.fillStyle = hexAlpha(MUTED, fade * 0.8);
+            ctx.beginPath(); ctx.arc(px, py, 2.6 * (1 - 0.4 * f), 0, 2 * Math.PI); ctx.fill();
+          }
+          ctx.fillStyle = hexAlpha(MUTED, fade);
+          ctx.font = '12px JetBrains Mono, monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText('miss', ax, ay - 18 - f * 6);
+        }
       }
 
       raf = requestAnimationFrame(draw);
@@ -732,43 +890,82 @@ export function ProjectileMode() {
           </p>
         </div>
 
+        {/* game mode toggle */}
+        <div className="mt-3 border-t border-usna-grid pt-3">
+          {!gameMode ? (
+            <button
+              onClick={startGame}
+              className="w-full py-2 rounded text-sm font-medium bg-usna-deep text-usna-text border border-usna-grid hover:border-usna-gold hover:text-usna-gold transition-colors"
+            >
+              🎮 Start game mode
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={newRound}
+                className="flex-1 py-2 rounded text-sm font-medium bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors"
+              >
+                ⟳ Next target
+              </button>
+              <button
+                onClick={exitGame}
+                className="py-2 px-3 rounded text-sm font-medium bg-usna-deep text-usna-muted border border-usna-grid hover:border-usna-gold hover:text-usna-gold transition-colors"
+              >
+                Exit
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* fire + analysis tools */}
         <div className="mt-3 border-t border-usna-grid pt-3 flex flex-col gap-2">
           <button
             onClick={fire}
             className="w-full py-2 rounded text-sm font-medium bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors"
           >
-            ● Fire (plot shot + score)
+            {gameMode ? '🎯 Take the shot' : '● Fire (plot shot + score)'}
           </button>
-          <div className="flex gap-2">
-            <button
-              onClick={hold}
-              className="flex-1 py-1.5 rounded text-sm font-medium bg-usna-deep text-usna-text border border-usna-grid hover:border-usna-gold hover:text-usna-gold transition-colors"
-            >
-              ⎈ Hold arc
-            </button>
-            <button
-              onClick={() => { setHeld([]); setShots([]); }}
-              className="flex-1 py-1.5 rounded text-sm font-medium bg-usna-deep text-usna-muted border border-usna-grid hover:border-usna-gold hover:text-usna-gold transition-colors"
-            >
-              Clear
-            </button>
-          </div>
-          <button
-            onClick={() => setSweeping((s) => !s)}
-            className={`w-full py-1.5 rounded text-sm font-medium border transition-colors ${
-              sweeping
-                ? 'bg-usna-gold text-usna-navy border-usna-gold'
-                : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
-            }`}
-          >
-            {sweeping ? '❚❚ Stop sweep' : '⟳ Sweep & auto-fire 0→90°'}
-          </button>
-          <p className="text-usna-muted text-xs leading-snug">
-            Drag the 🎯 target on the ground and try to land a shot in it — a
-            complementary pair of angles gives two ways to hit it (in vacuum).
-          </p>
+          {!gameMode && (
+            <>
+              <div className="flex gap-2">
+                <button
+                  onClick={hold}
+                  className="flex-1 py-1.5 rounded text-sm font-medium bg-usna-deep text-usna-text border border-usna-grid hover:border-usna-gold hover:text-usna-gold transition-colors"
+                >
+                  ⎈ Hold arc
+                </button>
+                <button
+                  onClick={() => { setHeld([]); setShots([]); }}
+                  className="flex-1 py-1.5 rounded text-sm font-medium bg-usna-deep text-usna-muted border border-usna-grid hover:border-usna-gold hover:text-usna-gold transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+              <button
+                onClick={() => setSweeping((s) => !s)}
+                className={`w-full py-1.5 rounded text-sm font-medium border transition-colors ${
+                  sweeping
+                    ? 'bg-usna-gold text-usna-navy border-usna-gold'
+                    : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
+                }`}
+              >
+                {sweeping ? '❚❚ Stop sweep' : '⟳ Sweep & auto-fire 0→90°'}
+              </button>
+              <p className="text-usna-muted text-xs leading-snug">
+                Drag the 🎯 target on the ground and try to land a shot in it. A
+                complementary pair of angles gives two ways to hit it (in vacuum).
+              </p>
+            </>
+          )}
+          {gameMode && (
+            <p className="text-usna-muted text-xs leading-snug">
+              Line up the dotted guide with the target, then take the shot. Closer to
+              the centre scores more: bullseye 100, inner 60, hit 30.
+            </p>
+          )}
         </div>
 
+        {/* readouts + scoreboard */}
         <div className="mt-3 border-t border-usna-grid pt-3">
           <Readout label={drag ? 'Range R (air)' : 'Range R'} value={activeRange.toFixed(1)} unit="m" />
           {drag && <Readout label="Range R (vacuum)" value={live.range.toFixed(1)} unit="m" />}
@@ -776,11 +973,48 @@ export function ProjectileMode() {
           <Readout label="Flight time" value={(drag && liveDrag ? liveDrag.tF : live.tF).toFixed(2)} unit="s" />
           <Readout label="Optimal angle (vac)" value={optA.toFixed(1)} unit="°" />
           <Readout label="Target x" value={targetX.toFixed(0)} unit="m" />
-          <Readout
-            label="Hits / shots"
-            value={`${score.hits} / ${score.shots}`}
-            unit={lastResult === 'hit' ? '✓ HIT' : lastResult === 'miss' ? '✗ miss' : ''}
-          />
+
+          {gameMode ? (
+            <div className="mt-2 rounded border border-usna-grid bg-usna-deep p-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-usna-text text-sm font-medium">Score</span>
+                {game.lastBand && (
+                  <span className={`text-xs font-mono px-2 py-0.5 rounded ${game.lastBand === 'Miss' ? 'bg-usna-card text-usna-muted' : 'bg-usna-gold text-usna-navy'}`}>
+                    {game.lastBand === 'Miss' ? '✗ miss' : `✓ ${game.lastBand}`}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1.5 flex items-end gap-5">
+                <div><div className="text-2xl font-mono text-usna-gold leading-none">{game.points}</div><div className="text-[10px] text-usna-muted mt-0.5">points</div></div>
+                <div><div className="text-2xl font-mono text-usna-text leading-none">{game.rounds}</div><div className="text-[10px] text-usna-muted mt-0.5">rounds</div></div>
+                <div><div className="text-2xl font-mono text-usna-text leading-none">{game.best}</div><div className="text-[10px] text-usna-muted mt-0.5">best</div></div>
+              </div>
+              {game.lastDist != null && (
+                <div className="mt-1.5 text-[11px] font-mono text-usna-muted">
+                  last shot {game.lastDist.toFixed(1)} m from centre
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-2 rounded border border-usna-grid bg-usna-deep p-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-usna-text text-sm font-medium">Target practice</span>
+                {lastResult && (
+                  <span className={`text-xs font-mono px-2 py-0.5 rounded ${lastResult === 'hit' ? 'bg-usna-gold text-usna-navy' : 'bg-usna-card text-usna-muted'}`}>
+                    {lastResult === 'hit' ? '✓ HIT' : '✗ miss'}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1.5 flex items-end gap-5">
+                <div><div className="text-2xl font-mono text-usna-gold leading-none">{score.hits}</div><div className="text-[10px] text-usna-muted mt-0.5">hits</div></div>
+                <div><div className="text-2xl font-mono text-usna-text leading-none">{score.shots}</div><div className="text-[10px] text-usna-muted mt-0.5">shots</div></div>
+                <div><div className="text-2xl font-mono text-usna-text leading-none">{score.shots ? Math.round(100 * score.hits / score.shots) : 0}%</div><div className="text-[10px] text-usna-muted mt-0.5">accuracy</div></div>
+              </div>
+              <div className="mt-1.5 text-[11px] font-mono text-usna-muted">
+                landing {activeRange.toFixed(1)} m · target {targetX.toFixed(0)} m · {Math.abs(activeRange - targetX) <= TARGET_HALF ? 'in the ±3 m zone' : `off by ${activeRange - targetX >= 0 ? '+' : '−'}${Math.abs(activeRange - targetX).toFixed(1)} m`}
+              </div>
+            </div>
+          )}
         </div>
       </ControlPanel>
 

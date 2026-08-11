@@ -61,6 +61,7 @@ export default function UcmVisualizer({ mode = 'kinematic' }) {
 // KINEMATIC (L7)
 // ───────────────────────────────────────────────────────────────────────────
 const K_DEFAULTS = { r: 20, v: 15 };
+const K_R_MAX = 40; // matches the radius slider max; sets a fixed metres→px scale
 
 function Kinematic() {
   const wrapRef = useRef(null);
@@ -130,8 +131,10 @@ function Kinematic() {
       ctx = setupCanvas(canvas, W, H);
       cx = W / 2;
       cy = H / 2;
-      // pixels per meter: keep the largest circle comfortably inside the frame
-      scale = (Math.min(W, H) * 0.36) / rRef.current;
+      // Fixed pixels-per-metre (sized so the MAX radius just fits). The circle's
+      // on-screen size therefore tracks the actual radius instead of being
+      // rescaled to a constant size.
+      scale = (Math.min(W, H) * 0.42) / K_R_MAX;
     };
 
     const draw = (now) => {
@@ -142,8 +145,8 @@ function Kinematic() {
 
       const rM = rRef.current;
       const vM = vRef.current;
-      // recompute scale each frame so radius changes stay framed
-      scale = (Math.min(W, H) * 0.36) / rM;
+      // fixed metres→px scale, so a bigger radius draws a visibly bigger circle
+      scale = (Math.min(W, H) * 0.42) / K_R_MAX;
       const Rpx = rM * scale;
       const om = vM / rM; // angular rate
 
@@ -166,6 +169,7 @@ function Kinematic() {
       if (releaseNowRef.current) {
         ghostRef.current = {
           x: bx, y: by,
+          x0: bx, y0: by,         // release point (fixed) for the tangent line
           vx: tux * vM * scale,
           vy: tuy * vM * scale,
         };
@@ -174,6 +178,7 @@ function Kinematic() {
       if (ghostRef.current === 'relaunch') {
         ghostRef.current = {
           x: bx, y: by,
+          x0: bx, y0: by,         // release point (fixed) for the tangent line
           vx: tux * vM * scale,   // px/s along tangent
           vy: tuy * vM * scale,
         };
@@ -248,17 +253,25 @@ function Kinematic() {
       ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
       ctx.fill();
 
-      // ghost trail line (tangent extension) + ghost bead
+      // ghost straight-line path + ghost bead. The dotted line is the tangent
+      // from the RELEASE point (fixed) to the ghost, so it reads as the actual
+      // no-force path instead of a line back to the still-orbiting bead.
       const g = ghostRef.current;
       if (g && typeof g === 'object') {
-        ctx.strokeStyle = 'rgba(197,183,131,0.22)';
-        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = 'rgba(197,183,131,0.35)';
+        ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 6]);
         ctx.beginPath();
-        ctx.moveTo(bx, by);
+        ctx.moveTo(g.x0, g.y0);
         ctx.lineTo(g.x, g.y);
         ctx.stroke();
         ctx.setLineDash([]);
+        // mark the release point on the circle
+        ctx.fillStyle = 'rgba(197,183,131,0.55)';
+        ctx.beginPath();
+        ctx.arc(g.x0, g.y0, 3.5, 0, 2 * Math.PI);
+        ctx.fill();
+        // ghost bead
         ctx.fillStyle = GHOST;
         ctx.beginPath();
         ctx.arc(g.x, g.y, 6, 0, 2 * Math.PI);
@@ -267,7 +280,7 @@ function Kinematic() {
         ctx.fillStyle = GHOST;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('no-force', g.x, g.y - 14);
+        ctx.fillText('no force', g.x, g.y - 14);
       }
 
       // acceleration arrow — inward, length grows with a = v²/r (visual, capped)
@@ -292,6 +305,30 @@ function Kinematic() {
       ctx.arc(bx, by, 8, 0, 2 * Math.PI);
       ctx.fill();
       ctx.shadowBlur = 0;
+
+      // ── scale bar (fixed ruler) ───────────────────────────────────────────
+      // A constant 10 m reference. Because the metres→px scale is fixed, the bar
+      // stays put while the circle grows or shrinks against it as r changes.
+      const barM = 10;
+      const barPx = barM * scale;
+      const sbx = 18, sby = H - 18;
+      ctx.strokeStyle = MUTED;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sbx, sby); ctx.lineTo(sbx + barPx, sby);
+      ctx.moveTo(sbx, sby - 4); ctx.lineTo(sbx, sby + 4);
+      ctx.moveTo(sbx + barPx, sby - 4); ctx.lineTo(sbx + barPx, sby + 4);
+      ctx.stroke();
+      ctx.fillStyle = MUTED;
+      ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`${barM} m`, sbx, sby - 6);
+      // radius readout tied to the circle (top-left, clear of the Δv inset)
+      ctx.fillStyle = 'rgba(197,183,131,0.8)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`r = ${rM.toFixed(0)} m`, 14, 12);
 
       // ── Δv construction inset (WOW) ──────────────────────────────────────
       // Draw v(t) and v(t+Δt) tail-to-tail in a corner box and connect their
@@ -425,9 +462,9 @@ function Kinematic() {
           <canvas ref={canvasRef} className="block" />
         </div>
         <InfoPanel
-          title="Acceleration points inward — always"
+          title="Acceleration points inward, always"
           description={
-            "The speed never changes, yet the bead is accelerating every instant, because its velocity keeps changing direction. Pause and ask the room which way the acceleration points: most say \"forward,\" along the motion. It doesn't — the gold velocity arrow is tangent, but the acceleration arrow points dead at the center. The Δv inset shows why: draw v(t) and v(t+Δt) tail-to-tail and the difference Δv = v(t+Δt) − v(t) leans toward the center, and a = Δv/Δt inherits that direction. The blue hodograph traces the tip of the velocity vector, which sweeps its own circle of radius v. Finally, release the bead (Play launches a faint \"no-force\" ghost, or hit Release now while paused) and it flies off along the tangent in a straight line — that straight line is what motion with no force looks like; the circle exists only because something keeps pulling the bead inward."
+            "The speed is constant, yet the bead accelerates at every instant, because the direction of its velocity keeps changing. A common first guess is that the acceleration points forward, along the motion. It does not: the gold velocity arrow is tangent to the circle, while the acceleration arrow points at the center. The Δv inset shows why. Drawing v(t) and v(t+Δt) tail to tail, the difference Δv = v(t+Δt) − v(t) leans toward the center, and a = Δv/Δt inherits that direction. The blue hodograph traces the tip of the velocity vector, which sweeps out its own circle of radius v. Releasing the bead (Play launches a faint no-force ghost, or use Release now while paused) sends it off along the tangent in a straight line. That straight line is what motion with no force looks like; the circle exists only because a force keeps pulling the bead inward."
           }
           equation={String.raw`a_c = \frac{v^2}{r} = \omega^2 r \quad(\text{directed toward the center})`}
         />
@@ -441,7 +478,10 @@ function Kinematic() {
 // ───────────────────────────────────────────────────────────────────────────
 const B_DEFAULTS = { theta: 20, v: 25, r: 80, mu: 0.4 };
 
-function Banked() {
+// Exported so it can live as its own demo in Ch5 (Applications of Newton's Laws),
+// where banked-curve dynamics belongs, rather than as a mode of the UCM kinematics
+// demo. See ch05-applications/BankedCurve.jsx.
+export function Banked() {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -599,10 +639,11 @@ function Banked() {
       // car home position (mid-slope), then offset by the slide amount.
       const homeX = apexX;
       const homeY = baseY - (homeX - x0) * Math.tan(surfAngle);
-      // sliding UP/out also drifts the car off the surface along the normal
-      const outDrift = (!holds && fDeficit < 0) ? Math.min(40, Math.abs(slide) * 0.35) : 0;
-      const carX = homeX + upX * slide + nX * outDrift;
-      const carY = homeY + upY * slide + nY * outDrift;
+      // The car stays ON the banked surface and slides ALONG it: down-slope when
+      // it is too slow, up-slope (heading over the outer edge) when too fast. It
+      // never lifts off the plane along the normal.
+      const carX = homeX + upX * slide;
+      const carY = homeY + upY * slide;
 
       // draw the car body as a small tilted rectangle sitting on the surface
       ctx.save();
@@ -688,9 +729,9 @@ function Banked() {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       let msg, mcol;
-      if (atDesign) { msg = 'Design speed — no friction needed'; mcol = GOLD; }
-      else if (!holds) { msg = frictionUp ? 'SLIPPING DOWN the bank!' : 'SLIDING UP/OUT — losing grip!'; mcol = RED; }
-      else { msg = frictionUp ? 'f points UP the slope (too slow)' : 'f points DOWN the slope (too fast)'; mcol = GREEN; }
+      if (atDesign) { msg = 'Design speed: no friction needed'; mcol = GOLD; }
+      else if (!holds) { msg = frictionUp ? 'Slipping down the bank' : 'Sliding up and out: losing grip'; mcol = RED; }
+      else { msg = frictionUp ? 'f points up the slope (too slow)' : 'f points down the slope (too fast)'; mcol = GREEN; }
       ctx.fillStyle = mcol;
       ctx.fillText(msg, 14, 12);
 
@@ -801,7 +842,7 @@ function Banked() {
             {' '}−{' '}
             <span
               style={{ color: fFlipHigh ? RED : GREEN, fontWeight: fFlipHigh ? 700 : 400 }}
-              title="friction term — flips sign at the design speed"
+              title="friction term that flips sign at the design speed"
             >
               f·cosθ
             </span>
@@ -836,7 +877,7 @@ function Banked() {
         <InfoPanel
           title="Friction flips at the design speed"
           description={
-            "There is one speed — the design speed vd = √(r g tanθ) — where the banked track needs no friction at all: the horizontal component of the normal force alone supplies the entire centripetal pull. Drive slower than vd and the car tends to slide DOWN the bank, so static friction has to point UP the slope. Drive faster and the car tends to climb/slide OUT, so friction FLIPS and points DOWN the slope. The friction-budget gauge shows |f_req| against ±f_max: while the gold bar stays inside the green limits you have grip margin, but push past a limit and the overrun turns red — the car breaks loose and slides (down if too slow, up/out if too fast). Static friction can only ever deliver up to f_max, so the arrow is capped there (solid) and any unmet demand is drawn dashed. Watch the highlighted f·cosθ term in the x-equation change sign as you sweep through vd."
+            "At one speed, the design speed vd = √(r g tanθ), the banked track needs no friction: the horizontal component of the normal force alone supplies the whole centripetal pull. Below vd the car tends to slide down the bank, so static friction points up the slope. Above vd the car tends to slide up and out, so friction reverses and points down the slope. The friction-budget gauge compares |f_req| with ±f_max: while the gold bar stays inside the green limits there is grip to spare, and once it passes a limit the overrun turns red and the car breaks loose (down the bank if too slow, up and out if too fast). Static friction can supply at most f_max, so the arrow is capped there (solid) and any unmet demand is drawn dashed. The highlighted f·cosθ term in the x-equation changes sign as the speed sweeps through vd."
           }
           equation={String.raw`v_d = \sqrt{r\,g\,\tan\theta}, \qquad N\sin\theta - f\cos\theta = \frac{m v^2}{r}, \quad |f|\le \mu N`}
         />

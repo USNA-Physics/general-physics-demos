@@ -14,12 +14,13 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L1, L3, L8 | D01 · 1D Motion Grapher | `ch02-motion-1d/grapher` · default/area/force | ✅ |
 | L2 | D02 · Free Fall Explorer | `ch02-motion-1d/free-fall` | ✅ |
 | L4 | D04 · 2D Vector Kinematics | `ch03-motion-2d/vectors` | ✅ |
-| L5 | D05 · Relative Motion | `ch03-motion-2d/relative` | ⬜ |
-| L6 | D06 · Projectile Motion | `ch03-motion-2d/projectile` (moved out of Ch2) | ⬜ |
-| L7, L13 | D07 · UCM Visualizer | `ch03-motion-2d/ucm` · kinematic/banked | ⬜ |
+| L5 | D05 · Relative Motion | `ch03-motion-2d/relative` | ✅ |
+| L6 | D06 · Projectile Motion | `ch03-motion-2d/projectile` (moved out of Ch2) | ✅ |
+| L7 | D07 · UCM Visualizer | `ch03-motion-2d/ucm` | 🔄 |
 | L9, L10 | D09 · Free-Body Diagram Builder | `ch04-newton/fbd` · fbd/pairs | ⬜ |
 | L11 | D11 · Friction Incline | `ch05-applications/friction` | ⬜ |
 | L12 | D12 · Drag & Terminal Velocity | `ch05-applications/drag` (moved out of Ch2) | ⬜ |
+| L13 | D13 · Banked Curve | `ch05-applications/banked` (moved out of UCM/D07) | ⬜ |
 | L14 | D14 · Center of Mass Playground | `ch05-applications/cm` · default/tumbling | ⬜ |
 | L15–L17 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ⬜ |
 | L18–L20 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ⬜ |
@@ -38,6 +39,35 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D06 · Projectile Motion — L6 · ✅ solidified
+
+**Route:** `/#/sp211/ch03-motion-2d/projectile` (shares the Free Fall family's integrator)
+
+**Intended goal:** independence of horizontal and vertical motion; range/apex/flight-time; 45° optimum on flat ground (less with launch height); complementary angles give the same range; drag breaks the symmetry.
+
+**Changes this review:**
+- **Landing feedback:** every shot spawns an on-canvas burst at the impact point (confetti + "HIT!" on a hit, dust + "miss" otherwise).
+- **Clearer score card:** hits · shots · accuracy, a result chip, and a live "landing vs target, off by ±Z m" line.
+- **Game mode:** "Start game mode" → randomized reachable targets ("Next target"), a dotted aim guide tracing only the first ~60% of flight, a single fired shot (no preview), bullseye scoring by distance-from-centre (Bullseye 100 / Inner 60 / Hit 30), and a points/rounds/best scoreboard. Analysis tools hidden in game mode.
+
+**Verdict:** ✅ Solidified.
+
+### D05 · Relative Motion / Riverboat — L5 · ✅ solidified
+
+**Route:** `/#/sp211/ch03-motion-2d/relative`
+
+**Intended goal:** relative motion is vector addition, v_bg = v_bw + v_wg. Frame of reference is a viewpoint, not a second simulation: the same trajectory seen from the ground vs. from the water.
+
+**Changes this review:**
+- **Auto-fit view:** isotropic transform fits the whole crossing (launch, dock, buoy, track, sliding shoreline) into the pane with margins; scale is stable per configuration and rescales on control changes, so nothing runs off-frame.
+- **Coordinate grid + labels:** each pane draws a labeled metre grid representing that observer's rest frame (x downstream, y across). Ground features slide across the water-frame lattice, which is what makes the frame switch legible.
+- **Dock enlarged + labeled** (pilings, bold DOCK); added a **mid-channel buoy** as a second ground-fixed hazard.
+- **Collision effects:** frame-independent bursts (detected in ground coords, rendered in all panes) — a "BONK!" splash at the buoy, a "DOCKED!" confetti fountain when the boat lands within 3 m of the dock. Fire once per crossing, re-armed on loop/param change.
+- **Text professionalized** (InfoPanel, banners, badge, legend, captions): no em-dashes, no second person.
+- Correctness: in the water frame the boat's trail is anchored to the fixed water point while the launch marker slides.
+
+**Verdict:** ✅ Solidified.
 
 ### D04 · 2D Vector Kinematics Sandbox — L4 · ✅ solidified
 
