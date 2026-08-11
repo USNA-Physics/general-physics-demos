@@ -125,3 +125,70 @@ USNA Navy & Gold palette — dark theme optimized for projected displays:
 ## License
 
 Internal use — USNA Physics Department.
+
+---
+
+## Architecture Overview
+
+A plain-English summary of how the whole thing is put together.
+
+### Fully client-side — no backend
+There is **no server, database, or API**. Every simulation runs entirely in the
+browser: the physics is computed in JavaScript on each animation frame, plots are
+drawn client-side, and there is nothing to authenticate against or query. The
+build produces only **static files** (HTML, JS, CSS, media), so it can be hosted
+by any static file server — or opened from a local folder — with zero
+configuration. Once the page has loaded, it works **offline** (all code and media
+are self-contained; no external CDNs or runtime services are called).
+
+### Yes, it's a single-page app (SPA)
+One HTML document (`index.html`) boots a React app that owns all navigation
+**in the browser**. Moving between the course list, a chapter, or an individual
+demo never triggers a full page load or a network round-trip for a new document —
+React swaps the view instantly. Routing uses **`HashRouter`** (URLs look like
+`…/#/sp211/ch07-energy/landscape?mode=equilibria`); the hash keeps deep links and
+refreshes working on any static host (and even `file://`) without server-side
+rewrite rules. Per-lesson views are selected with a `?mode=` query parameter.
+
+### How it renders
+- **HTML5 Canvas + `requestAnimationFrame`** for the interactive simulations
+  (particles, fields, waveforms) — one bounded-`dt` loop per demo.
+- **Plotly** (`react-plotly.js`) for data plots (x/v/a graphs, spectra, etc.).
+- **KaTeX** for typeset equations, **Web Audio API** for demos with sound.
+- **Tailwind CSS** for layout/styling; USNA navy/gold dark theme.
+
+### How it's structured
+- **Registry-driven:** `src/registry.js` is the single manifest of courses →
+  chapters → experiments. Routes, navigation, breadcrumbs, and the "by lesson"
+  index are all generated from it.
+- **Code-split:** every demo is a `React.lazy()` dynamic import, so it ships as
+  its own chunk and is downloaded only when opened. Heavy shared deps (Plotly,
+  KaTeX) are split into their own cached chunks.
+
+### How it's built
+**Vite 5** bundles the app to static assets in `dist/`. `base: './'` makes every
+asset path relative, so the site works from any subdirectory (e.g. a GitHub Pages
+project path) with no rebuild. No SSR, no server rendering — build output is 100%
+static.
+
+### How it's deployed
+A **GitHub Actions** workflow (`.github/workflows/deploy.yml`) runs on every push
+to `main`: it checks out the repo, `npm ci`, `npm run build`, and publishes
+`dist/` to **GitHub Pages** (source = GitHub Actions). Pages serves the static
+files over HTTPS from GitHub's CDN. Media (video/audio) are ordinary static files
+in `public/media/`, committed as regular Git objects and served from the same
+origin.
+
+### Access & analytics
+- A lightweight **client-side password gate** (`src/shell/PasswordGate.jsx`)
+  keeps casual visitors out. It compares a SHA-256 hash (not the plaintext) and
+  remembers the unlock in `localStorage`. This is *not* real security — on static
+  hosting the assets are ultimately reachable — it just deters passers-by.
+- **Google Analytics 4** is wired but **off by default** (`src/analytics.js`); it
+  activates only when a `VITE_GA_ID` build variable is set, and then tracks SPA
+  page views across the hash routes.
+
+### Tech stack at a glance
+React 18 · Vite 5 · Tailwind CSS 3 · React Router 6 (HashRouter) · Plotly.js ·
+KaTeX · HTML5 Canvas · Web Audio API · Vitest — deployed static to GitHub Pages
+via GitHub Actions.
