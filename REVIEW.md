@@ -33,14 +33,40 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L29, L30 | D30 · Angular Momentum Conservation | `ch10-angular-momentum/conservation` · vector/skater | ✅ |
 | L31, L32 | D31 · Orbit Simulator | `ch11-gravity/orbits` · kepler/escape | ✅ |
 | L33, L34 | D34 · Buoyancy Tank | `ch13-fluids/tank` · pressure/buoyancy | ✅ |
-| L35, L36 | D35 · SHM Explorer | `ch14-oscillations/shm` · spring/pendulum | ⬜ |
-| L37, L38 | D37 · Traveling Wave Explorer | `ch15-waves/traveling` · transverse/longitudinal | ⬜ |
+| L35, L36 | D35 · SHM Explorer | `ch14-oscillations/shm` · spring/pendulum/double-spring/double-pendulum | ✅ |
+| L37, L38 | D37 · Traveling Wave Explorer | `ch15-waves/traveling` · transverse/longitudinal | ✅ |
 | L39 | D39 · Doppler Wavefront Visualizer | `ch15-waves/doppler` | ⬜ |
 | L40, L41 | D40 · Superposition Sandbox | `ch16-superposition/sandbox` · beats/standing | ⬜ |
 
 ---
 
 ## Review log
+
+### D37 · Traveling Wave Explorer — L37 (transverse) · L38 (longitudinal) · ✅ solidified
+
+**Route:** `/#/sp211/ch15-waves/traveling` (transverse / longitudinal)
+
+**Goal:** a traveling wave carries pattern and energy while the medium only oscillates in place; longitudinal displacement vs pressure are 90° apart (compression = pressure max = displacement zero); sound intensity falls as 1/r² (−6 dB per doubling).
+
+**Changes this review:** tone pass only (functionality approved as-is) — de-AI'd the transverse InfoPanel, the on-canvas particle label, the longitudinal note, and both LG_INFO descriptions (em-dashes → clean punctuation).
+
+**Verdict:** ✅ Solidified (transverse + longitudinal).
+
+### D35 · SHM Explorer — L35 (spring) · L36 (pendulum) · ✅ solidified
+
+**Route:** `/#/sp211/ch14-oscillations/shm` (spring / pendulum / double-spring / double-pendulum)
+
+**Goal:** SHM as x = A cos ωt with amplitude-independent period; the pendulum's isochronism breaking at large angle; coupled normal modes + beats; and deterministic chaos in the double pendulum.
+
+**Changes this review:**
+- **K/U energy bars synchronized:** they were published at ~12/s (aliasing against the period → choppy); now ~60/s so they track the motion smoothly.
+- **New mode — Coupled springs:** two masses / three springs; symmetric & antisymmetric normal-mode presets and a beats case; x₁(t)/x₂(t) traces and the x₁–x₂ phase portrait shown together; readouts for both mode frequencies and the beat period.
+- **New mode — Double pendulum (chaos):** full nonlinear equations (RK4), optional periodic drive torque + damping, gravity presets, and a perturbed twin (Δθ₁ = 0.001) that diverges (live separation readout); θ₂(t) trace and the θ₂–ω₂ phase portrait shown together.
+- Registry updated with the two new modes; new InfoPanels written in professional tone.
+
+**Note:** the original spring/pendulum InfoPanel copy still has shouting caps / em-dashes (tone pass outstanding, same as D34).
+
+**Verdict:** ✅ Solidified (all four modes).
 
 ### D34 · Buoyancy Tank — L33 (pressure) · L34 (buoyancy) · ✅ solidified
 

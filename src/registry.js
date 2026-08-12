@@ -390,6 +390,8 @@ const courses = [
             modes: [
               { slug: 'spring', label: 'Mass-spring (L35)' },
               { slug: 'pendulum', label: 'Pendulum (L36)' },
+              { slug: 'double-spring', label: 'Coupled springs' },
+              { slug: 'double-pendulum', label: 'Double pendulum (chaos)' },
             ],
             component: lazy(() => import('./courses/sp211/ch14-oscillations/ShmExplorer')),
           },

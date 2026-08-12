@@ -79,11 +79,19 @@ export default function SuperpositionSandbox({ mode = 'beats' }) {
 // BEATS (L40)
 // ════════════════════════════════════════════════════════════════════════════
 
-const BEAT_DEFAULTS = { f1: 4.0, f2: 4.0, volume: 0.25 };
+// Low display frequencies so the ripple crosses the window at a calm, watchable
+// pace, and f₁ ≠ f₂ (but close) so a slow beat is showing on load.
+const BEAT_DEFAULTS = { f1: 0.75, f2: 0.85, volume: 0.12 };
 // The slider frequencies (Hz) are low so the beat is watchable on-screen. For
 // the *ear* we transpose both up by this factor into the audible band; the beat
 // frequency |f1−f2| is preserved because the transpose is a common multiplier.
-const AUDIO_SCALE = 90;   // 4 Hz → 360 Hz, a comfortable tone
+// Audio: both tones sit near a fixed base pitch, each nudged up by its own display
+// frequency, so the two oscillators differ by exactly |f1−f2| Hz and beat at that
+// rate — the audible wah you hear matches the beat you see and the readout. (A
+// multiplicative transpose would scale the beat too, turning a 1 Hz beat into a
+// 260 Hz interval that does not beat at all.)
+const AUDIO_BASE = 300;   // Hz — the reference tone the two frequencies sit near
+const audioHz = (f) => AUDIO_BASE + f;
 const BEAT_XMAX = 12;     // metres of string shown
 const BEAT_SAMPLES = 600;
 const BEAT_SPEED = 1.0;   // wave phase speed used to turn f into ω on-screen
@@ -113,17 +121,23 @@ function BeatsMode() {
   const f2Ref = useRef(f2); f2Ref.current = f2;
   const showRef = useRef(showComponents); showRef.current = showComponents;
   const movingRef = useRef(moving); movingRef.current = moving;
+  const playingRef = useRef(playing); playingRef.current = playing;
+  const volumeRef = useRef(volume); volumeRef.current = volume;
 
   const fBeat = beatFreq(f1, f2);
 
-  // ── Web Audio: two oscillators through a gain node ────────────────────────
-  const audioRef = useRef({ ctx: null, osc1: null, osc2: null, gain: null });
+  // ── Web Audio ─────────────────────────────────────────────────────────────
+  // Two nearby tones beating is exactly one carrier at the average pitch,
+  // amplitude-modulated by the beat envelope. We synthesize it that way: a single
+  // oscillator whose GAIN is driven every frame by the SAME envelope the canvas
+  // draws (from the shared sim clock), so the audible wah is phase-locked to the
+  // picture — loud when the waves add, silent at the nodes.
+  const audioRef = useRef({ ctx: null, osc1: null, gain: null });
 
   const stopAudio = () => {
     const a = audioRef.current;
     try { a.osc1 && a.osc1.stop(); } catch (e) { /* already stopped */ }
-    try { a.osc2 && a.osc2.stop(); } catch (e) { /* already stopped */ }
-    a.osc1 = a.osc2 = null;
+    a.osc1 = null;
   };
 
   const startAudio = () => {
@@ -137,18 +151,13 @@ function BeatsMode() {
       a.gain.connect(a.ctx.destination);
     }
     if (a.ctx.state === 'suspended') a.ctx.resume();
-    a.gain.gain.setValueAtTime(volume, a.ctx.currentTime);
-
-    const mk = (freq) => {
-      const o = a.ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(freq * AUDIO_SCALE, a.ctx.currentTime);
-      o.connect(a.gain);
-      o.start();
-      return o;
-    };
-    a.osc1 = mk(f1Ref.current);
-    a.osc2 = mk(f2Ref.current);
+    a.gain.gain.setValueAtTime(0, a.ctx.currentTime); // the rAF loop drives the gain
+    const o = a.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(audioHz(0.5 * (f1Ref.current + f2Ref.current)), a.ctx.currentTime);
+    o.connect(a.gain);
+    o.start();
+    a.osc1 = o;
   };
 
   const toggleAudio = () => {
@@ -156,17 +165,16 @@ function BeatsMode() {
     else { startAudio(); setPlaying(true); }
   };
 
-  // keep running oscillators tuned to the current sliders
+  // keep the carrier at the average of the two frequencies
   useEffect(() => {
     const a = audioRef.current;
-    if (!playing || !a.ctx) return;
-    if (a.osc1) a.osc1.frequency.setTargetAtTime(f1 * AUDIO_SCALE, a.ctx.currentTime, 0.02);
-    if (a.osc2) a.osc2.frequency.setTargetAtTime(f2 * AUDIO_SCALE, a.ctx.currentTime, 0.02);
+    if (!playing || !a.ctx || !a.osc1) return;
+    a.osc1.frequency.setTargetAtTime(audioHz(0.5 * (f1 + f2)), a.ctx.currentTime, 0.02);
   }, [f1, f2, playing]);
 
   useEffect(() => {
     const a = audioRef.current;
-    if (a.ctx && a.gain) a.gain.gain.setTargetAtTime(volume, a.ctx.currentTime, 0.02);
+    if (a.ctx && a.gain && !playingRef.current) a.gain.gain.setTargetAtTime(0, a.ctx.currentTime, 0.02);
   }, [volume]);
 
   // stop + close audio on unmount
@@ -271,6 +279,18 @@ function BeatsMode() {
       //     cos=0 and they TRAVEL at v_g = Δω/Δk.
       const dk = kA - kB;
       const dOm = omA - omB;
+
+      // sonify the beat: drive the carrier's gain with the SAME temporal envelope
+      // we draw, so the audible wah is loud when the waves add and silent at the
+      // nodes, phase-locked to the picture (fixes the audio/visual drift).
+      {
+        const a = audioRef.current;
+        if (a.ctx && a.gain) {
+          const envNorm = Math.abs(Math.cos(0.5 * dOm * sim));
+          const g = playingRef.current ? volumeRef.current * envNorm : 0;
+          a.gain.gain.setTargetAtTime(g, a.ctx.currentTime, 0.02);
+        }
+      }
       if (isMoving && Math.abs(dk) > 1e-9) {
         const envFn = (s) => (x) =>
           s * 2 * ampPx * Math.abs(Math.cos(0.5 * dk * x - 0.5 * dOm * sim));
@@ -338,8 +358,8 @@ function BeatsMode() {
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <ControlPanel onReset={reset}>
-        <Slider label="Frequency f₁" value={Number(f1.toFixed(2))} min={1} max={8} step={0.05} unit="Hz" onChange={setF1} />
-        <Slider label="Frequency f₂" value={Number(f2.toFixed(2))} min={1} max={8} step={0.05} unit="Hz" onChange={setF2} />
+        <Slider label="Frequency f₁" value={Number(f1.toFixed(2))} min={0.5} max={1.5} step={0.05} unit="Hz" onChange={setF1} />
+        <Slider label="Frequency f₂" value={Number(f2.toFixed(2))} min={0.5} max={1.5} step={0.05} unit="Hz" onChange={setF2} />
 
         <div className="mb-4">
           <button
@@ -377,7 +397,7 @@ function BeatsMode() {
           <p className="text-usna-muted text-xs leading-snug">
             {moving
               ? 'Δk ≠ 0: beat nodes are spatial and travel at the group velocity vg = Δω/Δk, while the ripple moves at the phase velocity vp = ω̄/k̄.'
-              : 'Same k for both waves: the envelope breathes uniformly in time — temporal beats, no traveling nodes.'}
+              : 'Same k for both waves: the envelope breathes uniformly in time, a temporal beat with no traveling nodes.'}
           </p>
         </div>
 
@@ -391,8 +411,8 @@ function BeatsMode() {
               <Readout label="Group velocity vg" value={isFinite(live.vg) ? live.vg.toFixed(1) : '—'} unit="m/s" />
             </>
           )}
-          <Readout label="Audible f₁" value={(f1 * AUDIO_SCALE).toFixed(0)} unit="Hz" />
-          <Readout label="Audible f₂" value={(f2 * AUDIO_SCALE).toFixed(0)} unit="Hz" />
+          <Readout label="Audible tone f₁" value={audioHz(f1).toFixed(2)} unit="Hz" />
+          <Readout label="Audible tone f₂" value={audioHz(f2).toFixed(2)} unit="Hz" />
         </div>
       </ControlPanel>
 
@@ -417,7 +437,9 @@ function BeatsMode() {
 
 const STANDING_DEFAULTS = { n: 3, L: 1.0, waveSpeed: 20, ampFrac: 0.7 };
 const STANDING_SAMPLES = 300;
-const STAND_F1_SIM = 0.28;   // fundamental temporal frequency of the sim clock (slow, watchable)
+const STAND_F1_SIM = 0.10;   // fundamental temporal frequency of the sim clock; low so
+                             // even mode n oscillates slowly (n·f) — the velocity arrows
+                             // and KE↔PE transfer stay watchable up through the harmonics
 const MAX_HARMONIC = 6;
 const PLUCK_MODES = 12;      // harmonics kept in the pluck decomposition
 
@@ -794,7 +816,7 @@ function StandingMode() {
 
         <div className="border-t border-usna-grid pt-3">
           <div className="text-usna-text text-sm font-medium mb-2">Pluck the string</div>
-          <p className="text-usna-muted text-xs mb-2">Click/tap the string to pinch and release — it decomposes into harmonics.</p>
+          <p className="text-usna-muted text-xs mb-2">Click/tap the string to pinch and release; it decomposes into harmonics.</p>
           {pluckModes && (
             <button
               onClick={clearPluck}
@@ -817,11 +839,11 @@ function StandingMode() {
           {frozen && pluckApprox ? (
             <p className="text-[#7FB77E] text-xs mt-2 leading-snug">
               Flattest ≠ flat: residual peak {(live.flatResidual * 100).toFixed(0)}% of full
-              scale. A real plucked string never fully flattens — when the
+              scale. A real plucked string never fully flattens: when the
               fundamental crosses zero the higher harmonics do not.
             </p>
           ) : (
-            <p className="text-usna-muted text-xs mt-2">The string is flat — where did the energy go?</p>
+            <p className="text-usna-muted text-xs mt-2">The string is flat: where did the energy go?</p>
           )}
         </div>
 
@@ -869,8 +891,8 @@ function StandingMode() {
                 <div>nodes {n + 1} · antinodes {n}</div>
               </>
             )}
-            {frozen && !pluckApprox && <div className="text-[#7FB77E]">FROZEN · flat · all kinetic energy</div>}
-            {frozen && pluckApprox && <div className="text-[#7FB77E]">FROZEN · flattest · nearly all kinetic</div>}
+            {frozen && !pluckApprox && <div className="text-[#7FB77E]">Frozen · flat · all kinetic energy</div>}
+            {frozen && pluckApprox && <div className="text-[#7FB77E]">Frozen · flattest · nearly all kinetic</div>}
             {cavity && <div className="text-[#5B9BD5]">standing wave in a two-mirror cavity</div>}
           </div>
         </div>
@@ -888,7 +910,7 @@ function StandingMode() {
 
           {pluckModes && (
             <div className="bg-usna-card border border-usna-grid rounded-lg p-3 flex-1 min-w-0">
-              <div className="text-usna-text text-sm font-medium mb-2">Harmonic spectrum — tap to toggle</div>
+              <div className="text-usna-text text-sm font-medium mb-2">Harmonic spectrum · tap to toggle</div>
               <div className="flex items-end gap-1.5" style={{ height: 130 }}>
                 {pluckModes.map((b, i) => {
                   const frac = Math.abs(b) / specMax;
@@ -933,21 +955,21 @@ function StandingMode() {
 // ════════════════════════════════════════════════════════════════════════════
 const INFO = {
   beats: {
-    title: 'Beats — the sum has a slow pulse',
+    title: 'Beats: the sum has a slow pulse',
     description:
-      'Add two traveling waves whose frequencies are almost equal and the sum acquires a slowly breathing amplitude envelope. Where the two waves are momentarily in phase the sum is loud; a moment later they drift out of phase and cancel. That loud-soft-loud cycle repeats at the beat frequency f_beat = |f₁ − f₂| — read it right off the screen, and hear it as the wah-wah in the audio. Because both components here share the same wavenumber k, the envelope has no spatial structure: it breathes uniformly in time (a purely temporal beat). Set f₂ = f₁ (silence in the envelope, one steady tone), then detune by a hair and watch the pulse crawl into existence — then flip on "moving beats" to give the components different k and make the beat nodes travel.',
+      'Add two traveling waves whose frequencies are almost equal and the sum acquires a slowly breathing amplitude envelope. Where the two waves are momentarily in phase the sum is loud; a moment later they drift out of phase and cancel. That loud-soft-loud cycle repeats at the beat frequency f_beat = |f₁ − f₂|, which you read right off the screen and hear as the wah-wah in the audio. Because both components here share the same wavenumber k, the envelope has no spatial structure: it breathes uniformly in time (a purely temporal beat). Set f₂ = f₁ for one steady tone with no envelope, then detune by a hair and watch the pulse crawl into existence, and flip on "moving beats" to give the components different k and make the beat nodes travel.',
     equation: String.raw`\sin(\omega_1 t) + \sin(\omega_2 t) = 2\cos\!\Big(\tfrac{\omega_1-\omega_2}{2}t\Big)\sin\!\Big(\tfrac{\omega_1+\omega_2}{2}t\Big),\quad f_{\text{beat}} = |f_1 - f_2|`,
   },
   beatsMoving: {
-    title: 'Moving beats — group velocity vs phase velocity',
+    title: 'Moving beats: group velocity vs phase velocity',
     description:
-      'Give the two components slightly different wavenumbers as well as frequencies and the beat envelope acquires spatial structure: 2A·cos(½Δk·x − ½Δω·t). Now the beat NODES (blue dots) are real points on the string, and they travel — at the group velocity v_g = Δω/Δk — while the fast ripple underneath slides along at the phase velocity v_p = ω̄/k̄. Energy and information ride the envelope, so v_g is the speed that matters for a wave packet or a signal. When v_g ≠ v_p the medium is dispersive; when Δk → 0 you recover the uniform temporal beat of the previous view. This split is the seed of every wave-packet and dispersion discussion to come.',
+      'Give the two components slightly different wavenumbers as well as frequencies and the beat envelope acquires spatial structure: 2A·cos(½Δk·x − ½Δω·t). Now the beat nodes (blue dots) are real points on the string, and they travel at the group velocity v_g = Δω/Δk, while the fast ripple underneath slides along at the phase velocity v_p = ω̄/k̄. Energy and information ride the envelope, so v_g is the speed that matters for a wave packet or a signal. When v_g ≠ v_p the medium is dispersive; when Δk → 0 you recover the uniform temporal beat of the previous view. This split is the seed of every wave-packet and dispersion discussion to come.',
     equation: String.raw`y = 2A\cos\!\Big(\tfrac{\Delta k}{2}x - \tfrac{\Delta\omega}{2}t\Big)\sin(\bar k\,x - \bar\omega\,t),\quad v_p=\frac{\bar\omega}{\bar k},\ \ v_g=\frac{\Delta\omega}{\Delta k}`,
   },
   standing: {
-    title: 'Standing waves — motion everywhere, travel nowhere',
+    title: 'Standing waves: motion everywhere, travel nowhere',
     description:
-      'Two identical waves running in opposite directions sum to sin(kx)·cos(ωt): the position sin(kx) freezes the nodes and antinodes in place while cos(ωt) makes the whole pattern breathe. Fixed ends force whole numbers of half-wavelengths, so only the harmonics f_n = n·v/2L survive. Freeze the frame at the instant the string is dead flat: displacement is zero, so potential energy is zero — yet the string is moving fastest everywhere, and the energy is entirely kinetic (watch the KE/PE bars: KE peaks exactly there). A subtlety worth the pause: this dead-flat instant is exact only for a SINGLE mode. A real plucked string is a sum of harmonics with incommensurate-looking phases, and when the fundamental crosses zero the higher harmonics generally do not — so a pluck never truly flattens; "freeze at flat" lands on the flattest instant, not a flat one. Scale the whole picture into a two-mirror cavity and you have the physics of a laser, the mode structure a Michelson interferometer reads out, and the kilometre-scale standing waves LIGO uses to feel a gravitational wave.',
+      'Two identical waves running in opposite directions sum to sin(kx)·cos(ωt): the position sin(kx) freezes the nodes and antinodes in place while cos(ωt) makes the whole pattern breathe. Fixed ends force whole numbers of half-wavelengths, so only the harmonics f_n = n·v/2L survive. Freeze the frame at the instant the string is dead flat: displacement is zero, so potential energy is zero, yet the string is moving fastest everywhere and the energy is entirely kinetic (watch the KE/PE bars: KE peaks exactly there). A subtlety worth the pause: this dead-flat instant is exact only for a single mode. A real plucked string is a sum of harmonics with incommensurate-looking phases, and when the fundamental crosses zero the higher harmonics generally do not, so a pluck never truly flattens; "freeze at flat" lands on the flattest instant, not a flat one. Scale the whole picture into a two-mirror cavity and you have the physics of a laser, the mode structure a Michelson interferometer reads out, and the kilometre-scale standing waves LIGO uses to feel a gravitational wave.',
     equation: String.raw`y(x,t) = 2A\sin(kx)\cos(\omega t), \qquad f_n = \frac{n\,v}{2L}`,
   },
 };

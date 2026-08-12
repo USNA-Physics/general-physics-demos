@@ -325,7 +325,7 @@ function Transverse() {
 
       // hint text
       ctx.fillStyle = MUTED; ctx.font = '12px monospace';
-      ctx.fillText(p.selected == null ? 'tap a dot to track a particle' : 'this dot moves ↕ only — the shape moves →', x0, H - 8);
+      ctx.fillText(p.selected == null ? 'tap a dot to track a particle' : 'this dot moves ↕ only; the shape moves →', x0, H - 8);
 
       // publish live readout for the tracked particle
       if (p.selected != null) {
@@ -434,7 +434,7 @@ function Transverse() {
         </div>
         <InfoPanel
           title="What actually travels?"
-          description="The gold waveform sails to the right at speed v, but every marked dot only bobs straight up and down — track one and its horizontal displacement stays exactly zero. Turn on the ghost trail: each particle's history is a vertical smear, so the medium's motion is a picket fence of vertical bars while the shape glides through. Turn on energy flow: the local power P = −F_T (∂y/∂x)(∂y/∂t) is positive everywhere for a rightward wave, so energy is carried steadily to the right even though no particle goes anywhere. Note that v is set by the string (F_T and μ) — you cannot make the wave faster by shaking harder; a bigger frequency just shortens the wavelength so that v = f·λ still holds."
+          description="The gold waveform sails to the right at speed v, but every marked dot only bobs straight up and down: track one and its horizontal displacement stays exactly zero. Turn on the ghost trail and each particle's history is a vertical smear, so the medium's motion is a picket fence of vertical bars while the shape glides through. Turn on energy flow and the local power P = −F_T (∂y/∂x)(∂y/∂t) is positive everywhere for a rightward wave, so energy is carried steadily to the right even though no particle goes anywhere. The speed v is set by the string (F_T and μ), so you cannot make the wave faster by shaking harder; a bigger frequency just shortens the wavelength so that v = f·λ still holds."
           equation={String.raw`y(x,t) = A\sin(kx - \omega t), \quad v = f\lambda = \sqrt{\tfrac{F_T}{\mu}}, \quad P = -F_T\,\tfrac{\partial y}{\partial x}\,\tfrac{\partial y}{\partial t}`}
         />
       </div>
@@ -516,7 +516,7 @@ function Longitudinal() {
               <Readout label="Frequency f" value={freq.toFixed(2)} unit="Hz" />
               <Readout label="Displ. / pressure lag" value="90" unit="°" />
               <p className="text-usna-muted text-xs mt-2 leading-relaxed">
-                Compressions (crowded dots) sit where displacement crosses zero — right where pressure peaks. Drag the cursor on the plot to read s, p, and density at one point.
+                Compressions (crowded dots) sit where displacement crosses zero, right where pressure peaks. Drag the cursor on the plot to read s, p, and density at one point.
               </p>
             </>
           ) : (
@@ -559,12 +559,12 @@ function Longitudinal() {
 const LG_INFO = {
   column: {
     title: 'Displacement vs. pressure: 90° apart',
-    description: 'The dots are the air molecules; the wave passes left-to-right as a train of compressions (crowding) and rarefactions (thinning). The blue curve is molecular displacement s(x,t); the red curve is the pressure variation, which is p ∝ −∂s/∂x — the negative slope of the displacement. That derivative relation puts them exactly a quarter-wavelength out of phase: pressure is largest where displacement is zero and its slope steepest (the center of a compression), and pressure is zero at the displacement extremes. Reading a compression as "maximum displacement" is the classic exam trap — it is maximum pressure and zero displacement. Drag the vertical cursor to read s, p, and the local crowding at any point.',
+    description: 'The dots are the air molecules; the wave passes left-to-right as a train of compressions (crowding) and rarefactions (thinning). The blue curve is molecular displacement s(x,t); the red curve is the pressure variation p ∝ −∂s/∂x, the negative slope of the displacement. That derivative relation puts them exactly a quarter-wavelength out of phase: pressure is largest where displacement is zero and its slope steepest (the center of a compression), and pressure is zero at the displacement extremes. Reading a compression as "maximum displacement" is the classic exam trap; it is maximum pressure and zero displacement. Drag the vertical cursor to read s, p, and the local crowding at any point.',
     equation: String.raw`s(x,t)=s_m\cos(kx-\omega t),\qquad p=-B\frac{\partial s}{\partial x}=p_m\sin(kx-\omega t)`,
   },
   intensity: {
     title: 'Sound spreads: the 1/r² falloff',
-    description: 'A point source radiates power P over an expanding sphere, so the intensity through each ring falls as I = P/(4πr²). Drag the two listeners and read the difference: every doubling of distance quarters the intensity, which is a drop of only 6 dB because the decibel scale is logarithmic. Loudness does not fall off linearly with distance — moving from 3 m to 6 m is −6 dB, not −50%.',
+    description: 'A point source radiates power P over an expanding sphere, so the intensity through each ring falls as I = P/(4πr²). Drag the two listeners and read the difference: every doubling of distance quarters the intensity, which is a drop of only 6 dB because the decibel scale is logarithmic. Loudness does not fall off linearly with distance; moving from 3 m to 6 m is −6 dB, not −50%.',
     equation: String.raw`I=\frac{P}{4\pi r^2},\quad \beta = 10\log_{10}\!\frac{I}{I_0},\quad \Delta\beta = 20\log_{10}\!\frac{r_1}{r_2}`,
   },
 };

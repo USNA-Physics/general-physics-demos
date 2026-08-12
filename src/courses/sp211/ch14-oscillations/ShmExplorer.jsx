@@ -139,6 +139,8 @@ function roundRect(ctx, x, y, w, h, r) {
 // ═══════════════════════════════════════════════════════════════════════════
 export default function ShmExplorer({ mode = 'spring' }) {
   if (mode === 'pendulum') return <PendulumMode />;
+  if (mode === 'double-spring') return <DoubleSpringMode />;
+  if (mode === 'double-pendulum') return <DoublePendulumMode />;
   return <SpringMode />;
 }
 
@@ -433,8 +435,9 @@ function SpringMode() {
 
       void text; void arrow;
 
-      // publish readouts ~12/s
-      if (now - lastPublish > 80) {
+      // publish readouts ~60/s so the K/U energy bars track the motion smoothly
+      // (an ~12/s throttle aliased against the period and read as choppy)
+      if (now - lastPublish > 16) {
         lastPublish = now;
         setLive({ x, v, K, U, env });
       }
@@ -1041,3 +1044,424 @@ function ToggleRow({ label, on, onClick }) {
     </button>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COUPLED SPRINGS — two masses, three springs (wall–k–m–kc–m–k–wall). Normal
+// modes and beats, with x(t) traces and the x₁–x₂ phase portrait side by side.
+// ═══════════════════════════════════════════════════════════════════════════
+const DS_DEFAULTS = { k: 20, kc: 6, m: 1.0 };
+const DS_A0 = 0.8; // reference initial displacement (m)
+
+function DoubleSpringMode() {
+  const [k, setK] = useState(DS_DEFAULTS.k);
+  const [kc, setKc] = useState(DS_DEFAULTS.kc);
+  const [m, setM] = useState(DS_DEFAULTS.m);
+  const [preset, setPreset] = useState('beats');
+
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
+  const stateRef = useRef({ x1: DS_A0, v1: 0, x2: 0, v2: 0 }); // beats IC by default
+  const paramRef = useRef({ k, kc, m });
+  paramRef.current = { k, kc, m };
+
+  const applyIC = (which) => {
+    const s = stateRef.current;
+    s.v1 = 0; s.v2 = 0;
+    if (which === 'sym') { s.x1 = DS_A0; s.x2 = DS_A0; }        // in-phase mode
+    else if (which === 'anti') { s.x1 = DS_A0; s.x2 = -DS_A0; } // out-of-phase mode
+    else { s.x1 = DS_A0; s.x2 = 0; }                             // beats: push one mass
+  };
+  const choose = (p) => { setPreset(p); applyIC(p); };
+  const reset = () => { setK(DS_DEFAULTS.k); setKc(DS_DEFAULTS.kc); setM(DS_DEFAULTS.m); setPreset('beats'); applyIC('beats'); };
+
+  const wSym = Math.sqrt(k / m);
+  const wAnti = Math.sqrt((k + 2 * kc) / m);
+  const beatT = Math.abs(wAnti - wSym) > 1e-6 ? (2 * Math.PI) / Math.abs(wAnti - wSym) : Infinity;
+
+  useEffect(() => {
+    const canvas = canvasRef.current, wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    let ctx, W, H, raf, lastNow, simT = 0;
+    const trace = [];
+    const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
+
+    const step = (dt) => {
+      const { k, kc, m } = paramRef.current;
+      const s = stateRef.current;
+      const acc = (x1, x2) => [(-k * x1 - kc * (x1 - x2)) / m, (-k * x2 + kc * (x1 - x2)) / m];
+      const [a1, a2] = acc(s.x1, s.x2);
+      s.x1 += s.v1 * dt + 0.5 * a1 * dt * dt;
+      s.x2 += s.v2 * dt + 0.5 * a2 * dt * dt;
+      const [a1n, a2n] = acc(s.x1, s.x2);
+      s.v1 += 0.5 * (a1 + a1n) * dt;
+      s.v2 += 0.5 * (a2 + a2n) * dt;
+    };
+
+    const drawSpringH = (xa, xb, y, color) => {
+      const n = 12, w = 6, lead = 6;
+      const x0 = xa + lead, x1 = xb - lead, sp = x1 - x0;
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(xa, y); ctx.lineTo(x0, y);
+      for (let i = 1; i < n; i++) ctx.lineTo(x0 + (i / n) * sp, y + (i % 2 ? w : -w));
+      ctx.lineTo(x1, y); ctx.lineTo(xb, y); ctx.stroke();
+    };
+
+    const draw = (now) => {
+      if (lastNow === undefined) lastNow = now;
+      const dt = boundedDt(now, lastNow); lastNow = now;
+      const sub = 8; for (let i = 0; i < sub; i++) step(dt / sub);
+      simT += dt;
+      const s = stateRef.current;
+      trace.push({ t: simT, x1: s.x1, x2: s.x2 });
+      const traceMax = 9; while (trace.length && simT - trace[0].t > traceMax) trace.shift();
+
+      const gold = col('--color-gold', GOLD);
+      const grid = col('--color-grid', '#1A2332');
+      const muted = col('--color-muted', '#8B8C8E');
+      ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#0D1321'; ctx.fillRect(0, 0, W, H);
+
+      // ── top: physical coupled masses on a horizontal rail ──
+      const railY = H * 0.20;
+      const wallL = 24, wallR = W - 24, span = wallR - wallL;
+      const eq1 = wallL + span * 0.36, eq2 = wallL + span * 0.64;
+      const ppm = span * 0.13;
+      const cx1 = eq1 + s.x1 * ppm, cx2 = eq2 + s.x2 * ppm;
+      const mr = 17;
+      // walls
+      ctx.strokeStyle = muted; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(wallL, railY - 34); ctx.lineTo(wallL, railY + 34);
+      ctx.moveTo(wallR, railY - 34); ctx.lineTo(wallR, railY + 34); ctx.stroke();
+      // equilibrium ticks
+      ctx.strokeStyle = grid; ctx.setLineDash([4, 5]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(eq1, railY - 26); ctx.lineTo(eq1, railY + 26);
+      ctx.moveTo(eq2, railY - 26); ctx.lineTo(eq2, railY + 26); ctx.stroke(); ctx.setLineDash([]);
+      // springs
+      drawSpringH(wallL, cx1 - mr, railY, gold);
+      drawSpringH(cx1 + mr, cx2 - mr, railY, BLUE);
+      drawSpringH(cx2 + mr, wallR, railY, gold);
+      // masses
+      const mass = (x, color, label) => {
+        roundRect(ctx, x - mr, railY - mr, 2 * mr, 2 * mr, 6);
+        ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = '#0D1321'; ctx.font = 'bold 12px JetBrains Mono, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, x, railY);
+      };
+      mass(cx1, gold, '1'); mass(cx2, '#8FBEE8', '2');
+
+      // ── bottom-left: x1(t) & x2(t) traces ──
+      const plY0 = H * 0.40, plY1 = H - 16, plH = plY1 - plY0;
+      const plMidY = (plY0 + plY1) / 2;
+      const plX0 = 20, plX1 = W * 0.58, plW = plX1 - plX0;
+      ctx.strokeStyle = grid; ctx.lineWidth = 1;
+      ctx.strokeRect(plX0, plY0, plW, plH);
+      ctx.strokeStyle = 'rgba(139,140,142,0.25)';
+      ctx.beginPath(); ctx.moveTo(plX0, plMidY); ctx.lineTo(plX1, plMidY); ctx.stroke();
+      const xAmp = DS_A0 * 1.25, yScale = (plH / 2) / xAmp;
+      const plot = (key, color, width) => {
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+        trace.forEach((p, i) => {
+          const px = plX1 - ((simT - p.t) / traceMax) * plW;
+          const py = plMidY - p[key] * yScale;
+          i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        });
+        ctx.stroke();
+      };
+      plot('x2', '#8FBEE8', 1.8); plot('x1', gold, 2.2);
+      ctx.fillStyle = muted; ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('x₁(t) gold · x₂(t) blue', plX0 + 4, plY0 + 4);
+
+      // ── bottom-right: x1 vs x2 phase portrait ──
+      const psSize = Math.min(plH, W - 16 - (W * 0.62));
+      const psX = W * 0.62, psY = plMidY - psSize / 2;
+      const pscx = psX + psSize / 2, pscy = psY + psSize / 2, psS = (psSize / 2) / xAmp;
+      ctx.strokeStyle = grid; ctx.lineWidth = 1; ctx.strokeRect(psX, psY, psSize, psSize);
+      ctx.strokeStyle = 'rgba(139,140,142,0.25)';
+      ctx.beginPath(); ctx.moveTo(psX, pscy); ctx.lineTo(psX + psSize, pscy);
+      ctx.moveTo(pscx, psY); ctx.lineTo(pscx, psY + psSize); ctx.stroke();
+      ctx.strokeStyle = 'rgba(197,183,131,0.75)'; ctx.lineWidth = 1.6; ctx.beginPath();
+      trace.forEach((p, i) => {
+        const px = pscx + p.x1 * psS, py = pscy - p.x2 * psS;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      });
+      ctx.stroke();
+      ctx.fillStyle = '#FFFFFF'; ctx.beginPath();
+      ctx.arc(pscx + s.x1 * psS, pscy - s.x2 * psS, 3.5, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = muted; ctx.textAlign = 'left';
+      ctx.fillText('phase: x₁ vs x₂', psX + 4, psY + 4);
+
+      raf = requestAnimationFrame(draw);
+    };
+    resize(); raf = requestAnimationFrame(draw);
+    const ro = new ResizeObserver(resize); ro.observe(wrap);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
+  const presetBtn = (key, label) => (
+    <button
+      onClick={() => choose(key)}
+      className={`px-2 py-1.5 rounded text-xs text-left border transition-colors ${
+        preset === key ? 'bg-usna-gold text-usna-navy border-usna-gold'
+          : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
+      }`}
+    >{label}</button>
+  );
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-6">
+      <ControlPanel onReset={reset}>
+        <div className="mb-3">
+          <div className="text-usna-text text-sm font-medium mb-2">Initial condition</div>
+          <div className="grid grid-cols-1 gap-1.5">
+            {presetBtn('sym', 'Symmetric mode (in-phase)')}
+            {presetBtn('anti', 'Antisymmetric mode (out-of-phase)')}
+            {presetBtn('beats', 'Beats (push mass 1 only)')}
+          </div>
+        </div>
+        <Slider label="Outer stiffness (k)" value={k} min={4} max={60} step={1} unit="N/m" onChange={setK} />
+        <Slider label="Coupling (k_c)" value={kc} min={0} max={30} step={1} unit="N/m" onChange={setKc} />
+        <Slider label="Mass (m, both)" value={m} min={0.3} max={3} step={0.1} unit="kg" onChange={setM} />
+
+        <div className="mt-2 border-t border-usna-grid pt-3">
+          <Readout label="Symmetric ω" value={wSym.toFixed(2)} unit="rad/s" />
+          <Readout label="Antisymmetric ω" value={wAnti.toFixed(2)} unit="rad/s" />
+          <Readout label="Beat period" value={beatT === Infinity ? '∞' : beatT.toFixed(1)} unit="s" />
+        </div>
+      </ControlPanel>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div ref={wrapRef} className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden"
+             style={{ height: 460, background: '#0D1321' }}>
+          <canvas ref={canvasRef} className="block" />
+        </div>
+        <InfoPanel {...DS_INFO} />
+      </div>
+    </div>
+  );
+}
+
+const DS_INFO = {
+  title: 'Two masses, two normal modes, and beats',
+  description:
+    'Coupling two identical oscillators creates two normal modes: the symmetric mode, where both masses move together and the coupling spring never stretches, oscillates at ω = √(k/m); the antisymmetric mode, where they move oppositely, is faster at ω = √((k+2k_c)/m). Any motion is a sum of these two. Push only mass 1 and you excite both modes at once: because their frequencies differ slightly, they drift in and out of phase, so the energy sloshes fully from one mass to the other and back. That is a beat, with period 2π/(ω_anti − ω_sym). The x₁–x₂ phase portrait tells the modes apart at a glance: the symmetric mode is a line along x₁ = x₂, the antisymmetric mode a line along x₁ = −x₂, and beats trace a slowly rotating ellipse. Raise the coupling and the modes separate further, so the beats speed up.',
+  equation: String.raw`\omega_{\text{sym}}=\sqrt{\tfrac{k}{m}},\quad \omega_{\text{anti}}=\sqrt{\tfrac{k+2k_c}{m}},\quad T_{\text{beat}}=\frac{2\pi}{\omega_{\text{anti}}-\omega_{\text{sym}}}`,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOUBLE PENDULUM — full nonlinear equations (RK4), optional periodic drive and
+// damping, a perturbed twin to expose sensitive dependence, and θ(t) + phase
+// portrait (θ₂ vs ω₂) shown together so chaos is visible in the phase plane.
+// ═══════════════════════════════════════════════════════════════════════════
+const DP_DEFAULTS = { L: 1.0, m2r: 1.0, drive: 0, driveF: 0.6, damp: 0, g: 9.81 };
+const DP_IC = [2.2, 0, 2.4, 0]; // th1, w1, th2, w2 — a lively chaotic start
+
+function dpDeriv(s, t, P) {
+  const [th1, w1, th2, w2] = s;
+  const { m1, m2, L1, L2, g, b, Ad, Om } = P;
+  const d = th1 - th2, cs = Math.cos(d), sn = Math.sin(d);
+  const den = 2 * m1 + m2 - m2 * Math.cos(2 * d);
+  const dw1 = (-g * (2 * m1 + m2) * Math.sin(th1) - m2 * g * Math.sin(th1 - 2 * th2)
+    - 2 * sn * m2 * (w2 * w2 * L2 + w1 * w1 * L1 * cs)) / (L1 * den)
+    - b * w1 + Ad * Math.cos(Om * t);
+  const dw2 = (2 * sn * (w1 * w1 * L1 * (m1 + m2) + g * (m1 + m2) * Math.cos(th1)
+    + w2 * w2 * L2 * m2 * cs)) / (L2 * den) - b * w2;
+  return [w1, dw1, w2, dw2];
+}
+function dpRK4(s, t, dt, P) {
+  const a = dpDeriv(s, t, P);
+  const s2 = s.map((v, i) => v + 0.5 * dt * a[i]);
+  const bk = dpDeriv(s2, t + 0.5 * dt, P);
+  const s3 = s.map((v, i) => v + 0.5 * dt * bk[i]);
+  const c = dpDeriv(s3, t + 0.5 * dt, P);
+  const s4 = s.map((v, i) => v + dt * c[i]);
+  const dk = dpDeriv(s4, t + dt, P);
+  return s.map((v, i) => v + (dt / 6) * (a[i] + 2 * bk[i] + 2 * c[i] + dk[i]));
+}
+const wrapPi = (a) => { let x = a % (2 * Math.PI); if (x > Math.PI) x -= 2 * Math.PI; if (x < -Math.PI) x += 2 * Math.PI; return x; };
+
+function DoublePendulumMode() {
+  const [L, setL] = useState(DP_DEFAULTS.L);
+  const [m2r, setM2r] = useState(DP_DEFAULTS.m2r); // m2/m1
+  const [drive, setDrive] = useState(DP_DEFAULTS.drive);
+  const [driveF, setDriveF] = useState(DP_DEFAULTS.driveF);
+  const [damp, setDamp] = useState(DP_DEFAULTS.damp);
+  const [gKey, setGKey] = useState('earth');
+  const [twin, setTwin] = useState(true);
+  const [sep, setSep] = useState(0);
+
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
+  const aRef = useRef([...DP_IC]);
+  const bRef = useRef([DP_IC[0] + 0.001, 0, DP_IC[2], 0]); // perturbed twin
+  const paramRef = useRef({});
+  paramRef.current = {
+    m1: 1, m2: m2r, L1: L, L2: L, g: GRAVITY[gKey].g, b: damp,
+    Ad: drive, Om: driveF * 2 * Math.PI, twin,
+  };
+
+  const release = () => { aRef.current = [...DP_IC]; bRef.current = [DP_IC[0] + 0.001, 0, DP_IC[2], 0]; };
+  const reset = () => {
+    setL(DP_DEFAULTS.L); setM2r(DP_DEFAULTS.m2r); setDrive(DP_DEFAULTS.drive);
+    setDriveF(DP_DEFAULTS.driveF); setDamp(DP_DEFAULTS.damp); setGKey('earth'); setTwin(true);
+    release();
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current, wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    let ctx, W, H, raf, lastNow, simT = 0, lastPub = 0;
+    const th2Trace = [], phaseTrace = [];
+    const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
+
+    const bob = (px, py, L1, L2, s, ppm) => {
+      const x1 = px + L1 * ppm * Math.sin(s[0]), y1 = py + L1 * ppm * Math.cos(s[0]);
+      const x2 = x1 + L2 * ppm * Math.sin(s[2]), y2 = y1 + L2 * ppm * Math.cos(s[2]);
+      return { x1, y1, x2, y2 };
+    };
+
+    const draw = (now) => {
+      if (lastNow === undefined) lastNow = now;
+      const dt = boundedDt(now, lastNow); lastNow = now;
+      const P = paramRef.current;
+      const sub = 8, h = dt / sub;
+      for (let i = 0; i < sub; i++) {
+        aRef.current = dpRK4(aRef.current, simT + i * h, h, P);
+        if (P.twin) bRef.current = dpRK4(bRef.current, simT + i * h, h, P);
+      }
+      simT += dt;
+
+      const s = aRef.current;
+      th2Trace.push({ t: simT, th: wrapPi(s[2]) });
+      const tMax = 8; while (th2Trace.length && simT - th2Trace[0].t > tMax) th2Trace.shift();
+      phaseTrace.push([wrapPi(s[2]), s[3]]);
+      if (phaseTrace.length > 1400) phaseTrace.shift();
+
+      // publish twin separation ~12/s
+      if (now - lastPub > 80) {
+        lastPub = now;
+        const b = bRef.current;
+        setSep(Math.hypot(wrapPi(s[0] - b[0]), wrapPi(s[2] - b[2])));
+      }
+
+      const gold = col('--color-gold', GOLD);
+      const grid = col('--color-grid', '#1A2332');
+      const muted = col('--color-muted', '#8B8C8E');
+      ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#0D1321'; ctx.fillRect(0, 0, W, H);
+
+      // ── left: the double pendulum ──
+      const leftW = W * 0.48;
+      const px = leftW * 0.5, py = H * 0.30;
+      const ppm = Math.min(leftW * 0.30, H * 0.20) / Math.max(P.L1 + P.L2, 0.1);
+      // faint twin
+      if (P.twin) {
+        const bb = bob(px, py, P.L1, P.L2, bRef.current, ppm);
+        ctx.strokeStyle = 'rgba(224,108,108,0.55)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(bb.x1, bb.y1); ctx.lineTo(bb.x2, bb.y2); ctx.stroke();
+        ctx.fillStyle = 'rgba(224,108,108,0.65)';
+        ctx.beginPath(); ctx.arc(bb.x2, bb.y2, 6, 0, 2 * Math.PI); ctx.fill();
+      }
+      const B = bob(px, py, P.L1, P.L2, s, ppm);
+      ctx.strokeStyle = muted; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(B.x1, B.y1); ctx.lineTo(B.x2, B.y2); ctx.stroke();
+      ctx.fillStyle = muted; ctx.beginPath(); ctx.arc(px, py, 4, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = gold; ctx.shadowColor = gold; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(B.x1, B.y1, 8 * Math.sqrt(1), 0, 2 * Math.PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(B.x2, B.y2, 8 * Math.sqrt(P.m2), 0, 2 * Math.PI); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = muted; ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      if (P.twin) ctx.fillText('gold vs red: identical but for Δθ₁ = 0.001 rad', 12, H - 18);
+
+      // ── right-top: θ₂(t) trace ──
+      const rX0 = W * 0.52, rX1 = W - 14, rW = rX1 - rX0;
+      const tY0 = 18, tY1 = H * 0.46, tH = tY1 - tY0, tMid = (tY0 + tY1) / 2;
+      ctx.strokeStyle = grid; ctx.lineWidth = 1; ctx.strokeRect(rX0, tY0, rW, tH);
+      ctx.strokeStyle = 'rgba(139,140,142,0.25)';
+      ctx.beginPath(); ctx.moveTo(rX0, tMid); ctx.lineTo(rX1, tMid); ctx.stroke();
+      ctx.strokeStyle = gold; ctx.lineWidth = 1.8; ctx.beginPath();
+      th2Trace.forEach((p, i) => {
+        const qx = rX1 - ((simT - p.t) / tMax) * rW;
+        const qy = tMid - (p.th / Math.PI) * (tH / 2) * 0.92;
+        i ? ctx.lineTo(qx, qy) : ctx.moveTo(qx, qy);
+      });
+      ctx.stroke();
+      ctx.fillStyle = muted; ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('θ₂(t)', rX0 + 4, tY0 + 4);
+
+      // ── right-bottom: phase portrait θ₂ vs ω₂ ──
+      const pY0 = H * 0.50, pY1 = H - 14, pH = pY1 - pY0;
+      ctx.strokeStyle = grid; ctx.lineWidth = 1; ctx.strokeRect(rX0, pY0, rW, pH);
+      const pMidY = (pY0 + pY1) / 2, pMidX = (rX0 + rX1) / 2;
+      ctx.strokeStyle = 'rgba(139,140,142,0.22)';
+      ctx.beginPath(); ctx.moveTo(rX0, pMidY); ctx.lineTo(rX1, pMidY);
+      ctx.moveTo(pMidX, pY0); ctx.lineTo(pMidX, pY1); ctx.stroke();
+      let wMax = 1; for (const q of phaseTrace) wMax = Math.max(wMax, Math.abs(q[1]));
+      const sxp = (rW / 2) / Math.PI, syp = (pH / 2) / (wMax * 1.05);
+      ctx.strokeStyle = 'rgba(197,183,131,0.6)'; ctx.lineWidth = 1; ctx.beginPath();
+      phaseTrace.forEach((q, i) => {
+        const qx = pMidX + q[0] * sxp, qy = pMidY - q[1] * syp;
+        // pen-lift on the θ wrap so we don't draw a line across the plot
+        if (i > 0 && Math.abs(q[0] - phaseTrace[i - 1][0]) > Math.PI) { ctx.stroke(); ctx.beginPath(); ctx.moveTo(qx, qy); }
+        else if (i === 0) ctx.moveTo(qx, qy); else ctx.lineTo(qx, qy);
+      });
+      ctx.stroke();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath(); ctx.arc(pMidX + wrapPi(s[2]) * sxp, pMidY - s[3] * syp, 3.5, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = muted; ctx.textAlign = 'left'; ctx.fillText('phase: θ₂ vs ω₂', rX0 + 4, pY0 + 4);
+
+      raf = requestAnimationFrame(draw);
+    };
+    resize(); raf = requestAnimationFrame(draw);
+    const ro = new ResizeObserver(resize); ro.observe(wrap);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-6">
+      <ControlPanel onReset={reset}>
+        <button
+          onClick={release}
+          className="w-full mb-3 px-3 py-1.5 rounded text-sm font-semibold bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors"
+        >↻ Release again</button>
+        <Slider label="Arm length (L, each)" value={L} min={0.5} max={1.5} step={0.05} unit="m" onChange={setL} />
+        <Slider label="Mass ratio m₂/m₁" value={m2r} min={0.3} max={3} step={0.1} unit="" onChange={setM2r} />
+        <div className="border-t border-usna-grid pt-3 mt-1">
+          <Slider label="Drive torque" value={drive} min={0} max={30} step={1} unit="rad/s²" onChange={setDrive} />
+          <Slider label="Drive frequency" value={driveF} min={0.1} max={2} step={0.05} unit="Hz" onChange={setDriveF} />
+          <Slider label="Damping" value={damp} min={0} max={0.5} step={0.02} unit="1/s" onChange={setDamp} />
+        </div>
+        <div className="mt-2">
+          <div className="text-usna-text text-sm mb-1">Gravity</div>
+          <div className="flex gap-1.5">
+            {Object.entries(GRAVITY).map(([key, gg]) => (
+              <button key={key} onClick={() => setGKey(key)}
+                className={`flex-1 px-2 py-1 rounded text-xs border transition-colors ${
+                  gKey === key ? 'bg-usna-gold text-usna-navy border-usna-gold'
+                    : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
+                }`}>{gg.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3 border-t border-usna-grid pt-3">
+          <ToggleRow label="Perturbed twin (Δθ = 0.001)" on={twin} onClick={() => setTwin((t) => !t)} />
+          {twin && <Readout label="Twin separation" value={sep.toFixed(3)} unit="rad" />}
+        </div>
+      </ControlPanel>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div ref={wrapRef} className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden"
+             style={{ height: 460, background: '#0D1321' }}>
+          <canvas ref={canvasRef} className="block" />
+        </div>
+        <InfoPanel {...DP_INFO} />
+      </div>
+    </div>
+  );
+}
+
+const DP_INFO = {
+  title: 'Deterministic, yet unpredictable: chaos',
+  description:
+    'A double pendulum obeys the exact same Newtonian laws as the single one, but with two coupled arms the full nonlinear equations have no closed-form solution and the motion becomes chaotic. Release the gold twin and the red twin from angles that differ by only 0.001 rad: for a second or two they track each other, then they diverge completely. That is sensitive dependence on initial conditions, the signature of chaos, and the twin-separation readout climbs roughly exponentially. The θ₂ vs ω₂ phase portrait fills a tangled band rather than closing into the neat ellipse a simple oscillator traces. Add a periodic drive torque and the system is forced as well as chaotic; small changes to the drive can flip it between wandering and near-periodic windows. Turn gravity down to the Moon and everything slows, but the unpredictability stays.',
+  equation: String.raw`\ddot\theta_1,\ \ddot\theta_2 = f(\theta_1,\theta_2,\dot\theta_1,\dot\theta_2)\ +\ A_d\cos(\Omega t)`,
+};
