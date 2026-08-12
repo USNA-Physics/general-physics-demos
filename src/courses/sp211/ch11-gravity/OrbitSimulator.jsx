@@ -82,6 +82,7 @@ const vEscape = (r0) => Math.SQRT2 * vCircular(r0);
 const GOLD = '#C5B783';
 const BLUE = '#5B9BD5';
 const RED = '#E06C6C';
+const GREEN = '#7FB77E';
 
 // ── analytic conic solver ──────────────────────────────────────────────────
 // Given a launch radius r0 and a launch velocity of magnitude v making angle
@@ -134,6 +135,9 @@ export default function OrbitSimulator({ mode = 'kepler' }) {
 function makeSim(canvas, wrap, opts) {
   let ctx, W, H, raf;
   let cx, cy;                     // planet center (canvas px)
+  let viewScale = 1;              // render zoom so the whole predicted orbit fits
+  let viewCX, viewCY;             // world point mapped to the viewport center (pan)
+  let predEllipse = null;         // predicted bound orbit (closed polyline, world px)
   let body, ax, ay, trail;
   let phase;                      // 'flying' | 'crashed' | 'escaped'
   let prevAngle, angleAccum;      // for detecting completed orbits
@@ -164,6 +168,63 @@ function makeSim(canvas, wrap, opts) {
   };
 
   const dist = () => Math.hypot(body.x - cx, body.y - cy);
+
+  // Render transform: world → screen with a zoom and a pan, so the predicted orbit
+  // is centered and fills the viewport (this slides the planet off-center rather
+  // than pinning it). viewCX/viewCY is the world point drawn at the screen center.
+  const SX = (x) => W / 2 + (x - viewCX) * viewScale;
+  const SY = (y) => H / 2 + (y - viewCY) * viewScale;
+
+  // From the launch state vector, build the predicted bound orbit as a closed
+  // polyline (null if unbound) and frame it: fit and center the ellipse's bounding
+  // box in the viewport. The eccentricity vector orients tilted (click) ellipses.
+  const computePrediction = () => {
+    predEllipse = null;
+    const rx = body.x - cx, ry = body.y - cy;
+    const r = Math.hypot(rx, ry);
+    const v2 = body.vx * body.vx + body.vy * body.vy;
+    const E = 0.5 * v2 - GM / r;
+    if (E >= -1e-9 || r < 1e-6) {                  // unbound → no closed orbit to fit
+      // frame the planet and the launch neighborhood so the escape is visible
+      // leaving, rather than inheriting a huge near-parabolic ellipse's framing.
+      viewCX = cx; viewCY = cy;
+      viewScale = Math.max(0.12, Math.min(2.4, Math.min(W, H) * 0.42 / (3.2 * Math.max(r, 1))));
+      return;
+    }
+    const a = -GM / (2 * E);
+    const rv = rx * body.vx + ry * body.vy;
+    const ex = ((v2 - GM / r) * rx - rv * body.vx) / GM;
+    const ey = ((v2 - GM / r) * ry - rv * body.vy) / GM;
+    const e = Math.hypot(ex, ey);
+    const ux = e > 1e-6 ? ex / e : 1, uy = e > 1e-6 ? ey / e : 0;  // toward periapsis
+    const wx = -uy, wy = ux;                                        // minor axis dir
+    const bb = a * Math.sqrt(Math.max(0, 1 - e * e));
+    const ecx = cx - ux * (a * e), ecy = cy - uy * (a * e);        // ellipse center
+    const pts = [];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const N = 128;
+    for (let i = 0; i <= N; i++) {
+      const th = (i / N) * 2 * Math.PI, c = Math.cos(th), s = Math.sin(th);
+      const x = ecx + a * c * ux + bb * s * wx;
+      const y = ecy + a * c * uy + bb * s * wy;
+      pts.push([x, y]);
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    predEllipse = pts;
+    const bw = Math.max(maxX - minX, 1e-6), bh = Math.max(maxY - minY, 1e-6);
+    // fill ~90% of the viewport; clamp so tiny orbits don't over-zoom and huge
+    // near-parabolic ones overflow instead of shrinking to a dot.
+    viewScale = Math.max(0.12, Math.min(2.4, Math.min(W * 0.9 / bw, H * 0.9 / bh)));
+    viewCX = (minX + maxX) / 2;
+    viewCY = (minY + maxY) / 2;
+    // keep the planet (focus) on screen even when a large orbit cannot fully fit,
+    // so it never pans off the edge.
+    const marginX = (W / 2 - 50) / viewScale;
+    const marginY = (H / 2 - 50) / viewScale;
+    viewCX = Math.max(cx - marginX, Math.min(cx + marginX, viewCX));
+    viewCY = Math.max(cy - marginY, Math.min(cy + marginY, viewCY));
+  };
 
   // Launch state: opts.getLaunch() returns {x,y,vx,vy} in canvas px (world),
   // OR falls back to the simple tangential form via getR0()/getV().
@@ -198,6 +259,7 @@ function makeSim(canvas, wrap, opts) {
     frozenWedge = null;
     // dA/dt = ½ |r × v|
     dAdt = 0.5 * Math.abs((body.x - cx) * body.vy - (body.y - cy) * body.vx);
+    computePrediction();   // predicted orbit + auto-fit zoom for this launch
     opts.onReset && opts.onReset();
   };
 
@@ -236,8 +298,8 @@ function makeSim(canvas, wrap, opts) {
   const drawWedge = (poly, color) => {
     if (!poly || poly.length < 2) return;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    for (const p of poly) ctx.lineTo(p[0], p[1]);
+    ctx.moveTo(SX(cx), SY(cy));
+    for (const p of poly) ctx.lineTo(SX(p[0]), SY(p[1]));
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
@@ -302,7 +364,7 @@ function makeSim(canvas, wrap, opts) {
       ctx.beginPath();
       for (let i = 0; i < g.pts.length; i++) {
         const p = g.pts[i];
-        if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+        if (i === 0) ctx.moveTo(SX(p[0]), SY(p[1])); else ctx.lineTo(SX(p[0]), SY(p[1]));
       }
       ctx.stroke();
     }
@@ -314,9 +376,24 @@ function makeSim(canvas, wrap, opts) {
     ctx.strokeStyle = 'rgba(139,140,142,0.30)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(cx, cy, r0, 0, 2 * Math.PI);
+    ctx.arc(SX(cx), SY(cy), r0 * viewScale, 0, 2 * Math.PI);
     ctx.stroke();
     ctx.setLineDash([]);
+
+    // predicted orbit: the full ellipse the satellite will trace and repeat,
+    // drawn dotted so the path is legible before the trail catches up.
+    if (predEllipse) {
+      ctx.setLineDash([2, 6]);
+      ctx.strokeStyle = 'rgba(197,183,131,0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 0; i < predEllipse.length; i++) {
+        const p = predEllipse[i];
+        if (i === 0) ctx.moveTo(SX(p[0]), SY(p[1])); else ctx.lineTo(SX(p[0]), SY(p[1]));
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     // equal-area wedges (kepler mode only)
     if (opts.showSectors) {
@@ -330,8 +407,8 @@ function makeSim(canvas, wrap, opts) {
       ctx.strokeStyle = `rgba(240,236,227,${(t * 0.55).toFixed(3)})`;
       ctx.lineWidth = 0.7 + t * 1.5;
       ctx.beginPath();
-      ctx.moveTo(trail[i - 1][0], trail[i - 1][1]);
-      ctx.lineTo(trail[i][0], trail[i][1]);
+      ctx.moveTo(SX(trail[i - 1][0]), SY(trail[i - 1][1]));
+      ctx.lineTo(SX(trail[i][0]), SY(trail[i][1]));
       ctx.stroke();
     }
 
@@ -339,34 +416,36 @@ function makeSim(canvas, wrap, opts) {
     // tracked from the actual trajectory (so tilted ellipses label correctly and
     // a sub-circular launch correctly shows perigee on the FAR side).
     const drawApside = (x, y, label, color) => {
+      const px = SX(x), py = SY(y);
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+      ctx.arc(px, py, 3.5, 0, 2 * Math.PI);
       ctx.fill();
       ctx.font = '11px "JetBrains Mono", monospace';
-      ctx.fillText(label, x + 6, y - 6);
+      ctx.fillText(label, px + 6, py - 6);
     };
     if (opts.showSectors && phase === 'flying' && rMax > rMin * 1.05) {
       drawApside(rMinPos[0], rMinPos[1], 'perigee', 'rgba(197,183,131,0.9)');
       drawApside(rMaxPos[0], rMaxPos[1], 'apogee', 'rgba(91,155,213,0.9)');
     }
 
-    // planet glow + body
-    const glow = ctx.createRadialGradient(cx, cy, R_PLANET * 0.3, cx, cy, R_PLANET * 3.4);
+    // planet glow + body (drawn through the view transform, fixed marker radius)
+    const pcx = SX(cx), pcy = SY(cy);
+    const glow = ctx.createRadialGradient(pcx, pcy, R_PLANET * 0.3, pcx, pcy, R_PLANET * 3.4);
     glow.addColorStop(0, 'rgba(197,183,131,0.30)');
     glow.addColorStop(1, 'rgba(197,183,131,0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(cx, cy, R_PLANET * 3.4, 0, 2 * Math.PI);
+    ctx.arc(pcx, pcy, R_PLANET * 3.4, 0, 2 * Math.PI);
     ctx.fill();
     const bodyGrad = ctx.createRadialGradient(
-      cx - R_PLANET * 0.35, cy - R_PLANET * 0.35, R_PLANET * 0.2, cx, cy, R_PLANET,
+      pcx - R_PLANET * 0.35, pcy - R_PLANET * 0.35, R_PLANET * 0.2, pcx, pcy, R_PLANET,
     );
     bodyGrad.addColorStop(0, gold);
     bodyGrad.addColorStop(1, navy);
     ctx.fillStyle = bodyGrad;
     ctx.beginPath();
-    ctx.arc(cx, cy, R_PLANET, 0, 2 * Math.PI);
+    ctx.arc(pcx, pcy, R_PLANET, 0, 2 * Math.PI);
     ctx.fill();
 
     // satellite
@@ -376,7 +455,7 @@ function makeSim(canvas, wrap, opts) {
       ctx.shadowColor = gold;
       ctx.shadowBlur = 14;
       ctx.beginPath();
-      ctx.arc(body.x, body.y, 4.2, 0, 2 * Math.PI);
+      ctx.arc(SX(body.x), SY(body.y), 4.2, 0, 2 * Math.PI);
       ctx.fill();
       ctx.shadowBlur = 0;
     }
@@ -384,14 +463,22 @@ function makeSim(canvas, wrap, opts) {
     // let the caller paint extra overlays (aim vector during drag) in world px
     opts.onDraw && opts.onDraw(ctx, { cx, cy });
 
-    // status stamp
+    // status stamp / trace legend
     ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
     if (phase === 'crashed') {
       ctx.fillStyle = 'rgba(224,108,108,0.95)';
-      ctx.fillText('SUBORBITAL — impacted the surface', 12, H - 14);
+      ctx.fillText('Suborbital: the arc hit the surface.', 12, H - 14);
     } else if (phase === 'escaped') {
       ctx.fillStyle = 'rgba(224,108,108,0.95)';
-      ctx.fillText('ESCAPE — the satellite is gone', 12, H - 14);
+      ctx.fillText('Escape: the satellite is gone.', 12, H - 14);
+    } else if (predEllipse) {
+      // explain the two curves while a bound orbit is in flight
+      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.fillStyle = 'rgba(197,183,131,0.75)';
+      ctx.fillText('· · · predicted orbit', 12, H - 26);
+      ctx.fillStyle = 'rgba(240,236,227,0.75)';
+      ctx.fillText('—— path traced so far', 12, H - 12);
     }
 
     raf = requestAnimationFrame(draw);
@@ -432,7 +519,7 @@ function makeSim(canvas, wrap, opts) {
     },
     clearGhosts() { ghosts = []; reset(); },
     // Map a canvas-relative point to world px (for click-to-launch aim math).
-    center() { return { cx, cy, W, H }; },
+    center() { return { cx, cy, W, H, scale: viewScale, viewCX, viewCY }; },
     destroy() { cancelAnimationFrame(raf); ro.disconnect(); },
   };
 }
@@ -562,9 +649,14 @@ function KeplerLab() {
   const commitAim = (d) => {
     const cen = simRef.current.api?.center?.();
     if (!cen) return;
-    const rx = d.px - cen.cx, ry = d.py - cen.cy;
-    const vx = (d.curX - d.px) * VDRAG_SCALE;
-    const vy = (d.curY - d.py) * VDRAG_SCALE;
+    // Invert the current view transform (zoom + pan) so the clicked screen point
+    // and drag speed map to the correct world launch state under any framing.
+    const sc = cen.scale || 1;
+    const worldX = cen.viewCX + (d.px - cen.W / 2) / sc;
+    const worldY = cen.viewCY + (d.py - cen.H / 2) / sc;
+    const rx = worldX - cen.cx, ry = worldY - cen.cy;
+    const vx = (d.curX - d.px) * VDRAG_SCALE / sc;
+    const vy = (d.curY - d.py) * VDRAG_SCALE / sc;
     const r0 = Math.hypot(rx, ry);
     const speed = Math.hypot(vx, vy);
     // flight angle from local tangent (0 = tangential); needed for honest class
@@ -688,9 +780,9 @@ function KeplerLab() {
           </button>
           <p className="text-usna-muted text-xs leading-snug">
             "Fire faster" builds Newton's cannonball figure in layers: each shot
-            leaves a faded arc as the trajectory grows suborbital → circle →
-            ellipse → escape. Or <b>click the field and drag</b> to aim the full
-            velocity vector — a tilted ellipse whose perigee is not the launch point.
+            leaves a faded arc as the trajectory grows from suborbital to circle to
+            ellipse to escape. Or <b>click the field and drag</b> to aim the full
+            velocity vector, a tilted ellipse whose perigee is not the launch point.
           </p>
         </div>
 
@@ -738,7 +830,7 @@ function KeplerLab() {
 
         <div className="bg-usna-card border border-usna-grid rounded-lg p-4 min-w-0 overflow-hidden" style={{ height: 260 }}>
           <div className="text-usna-text text-sm font-medium mb-1">
-            Kepler III, built one orbit at a time — T² vs a³
+            Kepler III, built one orbit at a time: T² vs a³
           </div>
           <div style={{ height: 210 }}>
             <IntensityPlot traces={plotTraces} layoutOverrides={plotLayout} />
@@ -786,23 +878,28 @@ function EscapeLab() {
     setTimeout(() => simRef.current.api && simRef.current.api.relaunch(), 0);
   };
 
+  // Relaunch when a slider changes so the flying satellite, the live readouts, and
+  // the well's riding dot all track the current launch (the refs update first, so
+  // this runs after they are current).
+  useEffect(() => { simRef.current.api?.relaunch?.(); }, [alt, mult]);
+
   const r0 = R_PLANET + alt;
   const vesc = vEscape(r0);
 
-  // Bound / knife-edge / escape from the SIGN of E (the physics), plus the
-  // slider position as a cross-check.
-  const E = live.E;
-  const near0 = Math.abs(mult - 1) < 0.01;
-  const sign = near0 ? 0 : E < 0 ? -1 : 1;
-  const signColor = sign < 0 ? BLUE : sign > 0 ? RED : GOLD;
-  const signLabel = sign < 0 ? 'E < 0  ·  BOUND' : sign > 0 ? 'E > 0  ·  ESCAPE' : 'E = 0  ·  PARABOLIC KNIFE-EDGE';
-
-  // Turning point r_max = −GM/E (bound only). This is where K → 0 and the
-  // satellite momentarily stops before falling back; as E → 0⁻ it races to ∞.
-  // Use launch energy for a stable, slider-driven prediction.
+  // Launch energy drives the banner, the sign, and the well diagram together, so
+  // they always agree with the slider (the live-flight E is the same conserved
+  // value once launched). Turning point r_max = −GM/E exists only when bound.
   const vLaunch = mult * vesc;
   const Elaunch = 0.5 * vLaunch * vLaunch - GM / r0;
   const rTurn = Elaunch < -1e-9 ? -GM / Elaunch : Infinity;
+
+  // Bound / knife-edge / escape from the sign of E. Blue = bound (falls back),
+  // gold = the E = 0 knife-edge, green = escaped.
+  const E = Elaunch;
+  const near0 = Math.abs(mult - 1) < 0.01;
+  const sign = near0 ? 0 : E < 0 ? -1 : 1;
+  const signColor = sign < 0 ? BLUE : sign > 0 ? GREEN : GOLD;
+  const signLabel = sign < 0 ? 'E < 0  ·  bound orbit' : sign > 0 ? 'E > 0  ·  escape' : 'E = 0  ·  parabolic knife-edge';
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
@@ -821,7 +918,7 @@ function EscapeLab() {
             Creep the speed toward 1×v_esc. On the well diagram the horizontal
             E-line rises; while it still cuts the well there is a turning point
             r_max = −GM/E where the satellite stops and falls back. As E → 0⁻ that
-            turning point races off to infinity — the moment it clears the well,
+            turning point races off to infinity, and the moment it clears the well
             the satellite is gone.
           </p>
         </div>
@@ -904,10 +1001,13 @@ function PotentialWell({ r0, Elaunch, rTurn, liveR, sign }) {
       // wide enough to show the turning point when it is finite.
       const rMinX = R_PLANET;
       const rMaxX = Math.max(4 * r0, isFinite(rTurn) ? rTurn * 1.25 : 4 * r0);
-      // U range: from the deepest drawn well up to a bit above 0.
-      const Umin = -GM / rMinX;
-      const Umax = Math.max(0, Elaunch) + 0.15 * Math.abs(Umin);
-      const Ulo = Umin, Uhi = Umax;
+      // U range: focus on the region around the launch potential and the E-line
+      // rather than the full (very deep) well, so a small positive E sits visibly
+      // above U = 0 instead of collapsing onto it near the top of the frame. The
+      // well simply plunges off the bottom-left, which reads as a deep well.
+      const Uref = GM / r0;                            // |U| at the launch radius
+      const Ulo = -1.25 * Uref;
+      const Uhi = Math.max(0, Elaunch) + 0.2 * Uref;   // headroom above the E-line
 
       const X = (r) => PAD_L + ((r - rMinX) / (rMaxX - rMinX)) * plotW;
       const Y = (U) => PAD_T + (1 - (U - Ulo) / (Uhi - Ulo)) * plotH;
@@ -932,7 +1032,8 @@ function PotentialWell({ r0, Elaunch, rTurn, liveR, sign }) {
       ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
       ctx.fillText('U = 0', PAD_L + 4, y0 - 2);
 
-      // U(r) = −GM/r curve
+      // U(r) = −GM/r curve (only the portion inside the focused window; the deep
+      // part plunges off the bottom-left)
       ctx.strokeStyle = GOLD;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -940,6 +1041,7 @@ function PotentialWell({ r0, Elaunch, rTurn, liveR, sign }) {
       for (let px = 0; px <= plotW; px++) {
         const r = rMinX + (px / plotW) * (rMaxX - rMinX);
         const U = -GM / r;
+        if (U < Ulo) { first = true; continue; }   // below the frame → lift the pen
         const yy = Y(U);
         if (first) { ctx.moveTo(X(r), yy); first = false; } else ctx.lineTo(X(r), yy);
       }
@@ -949,7 +1051,7 @@ function PotentialWell({ r0, Elaunch, rTurn, liveR, sign }) {
       ctx.fillText('U(r) = −GM/r', W - PAD_R - 96, Y(-GM / rMaxX) - 14);
 
       // total-energy line E (horizontal)
-      const eColor = sign < 0 ? BLUE : sign > 0 ? RED : GOLD;
+      const eColor = sign < 0 ? BLUE : sign > 0 ? GREEN : GOLD;
       const yE = Y(Elaunch);
       ctx.strokeStyle = eColor;
       ctx.lineWidth = 2;
@@ -986,8 +1088,8 @@ function PotentialWell({ r0, Elaunch, rTurn, liveR, sign }) {
         ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
         ctx.fillText('r_max → off-screen', W - PAD_R - 2, yE - 8);
       } else {
-        // E ≥ 0: the line clears the well — no turning point, unbounded
-        ctx.fillStyle = RED;
+        // E ≥ 0: the line clears the well, no turning point, unbounded
+        ctx.fillStyle = GREEN;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('E clears the well → escapes to r = ∞', PAD_L + plotW / 2, yE - 12);
       }
@@ -1044,13 +1146,13 @@ const INFO = {
   kepler: {
     title: "Newton's cannonball → Kepler's laws",
     description:
-      'An orbit is just a projectile that keeps missing the ground. Because the launch is tangential, the launch radius is always an apsis — so below 1×v_c the satellite starts at apogee and its true perigee sits on the far side at r = 2a − r₀. Only when that far-side perigee dips below the surface does the shot actually crash (the "Far-side perigee alt" readout goes negative), so "Fire faster" honestly walks the arc from suborbital → circle → ellipse → escape, leaving each attempt faded behind it. The two shaded wedges sweep equal areas in equal numbers of steps and the dA/dt readout holds constant — Kepler II. Each completed orbit drops a point on the T² vs a³ plot, all landing on T² = (4π²/GM)·a³ — Kepler III, empirically. Click-and-drag sets the full velocity vector, tilting the ellipse so perigee is no longer where you launched.',
+      'An orbit is a projectile that keeps missing the ground. Because the launch is tangential, the launch radius is always an apsis, so below 1×v_c the satellite starts at apogee and its true perigee sits on the far side at r = 2a − r₀. The shot crashes only when that far-side perigee dips below the surface (the "Far-side perigee alt" readout goes negative), so "Fire faster" walks the arc from suborbital to circle to ellipse to escape, leaving each attempt faded behind it. The two shaded wedges sweep equal areas in equal numbers of steps and the dA/dt readout holds constant, which is Kepler II. Each completed orbit drops a point on the T² vs a³ plot, and they all land on T² = (4π²/GM)·a³, which is Kepler III measured directly. Click and drag sets the full velocity vector, tilting the ellipse so perigee is no longer where you launched.',
     equation: String.raw`\frac{dA}{dt} = \tfrac12|\vec r\times\vec v| = \text{const}, \qquad T^2 = \frac{4\pi^2}{GM}\,a^3`,
   },
   escape: {
     title: 'The sign of the energy decides everything',
     description:
-      'Total mechanical energy E = K + U is conserved along the whole trajectory (a symplectic velocity-Verlet integrator keeps that true numerically). Read it off the potential-well diagram: the horizontal E-line cuts the well U(r) = −GM/r at the turning point r_max = −GM/E, where the satellite momentarily stops and falls back — that is a bound orbit (E < 0). Raise the launch speed and the E-line rises; the turning point r_max races outward and, exactly at E = 0 (v = v_esc), it reaches infinity and the line just clears the lip of the well. Any higher and E > 0: the line never meets the well again, so nothing turns the satellite around and it escapes on a hyperbola. The sign of E is the whole story.',
+      'Total mechanical energy E = K + U is conserved along the whole trajectory (a symplectic velocity-Verlet integrator keeps that true numerically). Read it off the potential-well diagram: the horizontal E-line cuts the well U(r) = −GM/r at the turning point r_max = −GM/E, where the satellite momentarily stops and falls back, which is a bound orbit (E < 0). Raise the launch speed and the E-line rises; the turning point r_max races outward and, exactly at E = 0 (v = v_esc), it reaches infinity and the line just clears the lip of the well. Any higher and E > 0: the line never meets the well again, so nothing turns the satellite around and it escapes on a hyperbola. The sign of E decides bound versus escape.',
     equation: String.raw`E = \tfrac12 v^2 - \frac{GM}{r}, \qquad r_{\max} = -\frac{GM}{E}, \qquad v_{\text{esc}} = \sqrt{\frac{2GM}{r}}`,
   },
 };

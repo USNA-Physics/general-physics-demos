@@ -31,7 +31,7 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L25–L27 | D25 · Moment of Inertia Explorer | `ch09-rotation/inertia` · shapes/torque/dynamics | ✅ |
 | L28 | D28 · Rolling Race | `ch09-rotation/rolling` | ✅ |
 | L29, L30 | D30 · Angular Momentum Conservation | `ch10-angular-momentum/conservation` · vector/skater | ✅ |
-| L31, L32 | D31 · Orbit Simulator | `ch11-gravity/orbits` · kepler/escape | ⬜ |
+| L31, L32 | D31 · Orbit Simulator | `ch11-gravity/orbits` · kepler/escape | ✅ |
 | L33, L34 | D34 · Buoyancy Tank | `ch13-fluids/tank` · pressure/buoyancy | ⬜ |
 | L35, L36 | D35 · SHM Explorer | `ch14-oscillations/shm` · spring/pendulum | ⬜ |
 | L37, L38 | D37 · Traveling Wave Explorer | `ch15-waves/traveling` · transverse/longitudinal | ⬜ |
@@ -41,6 +41,32 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D31 · Orbit Simulator — L31 (kepler) · L32 (escape) · ✅ solidified
+
+**Route:** `/#/sp211/ch11-gravity/orbits` (kepler / escape)
+
+**Goal:** an orbit is a projectile that keeps missing the ground; the conic family (crash → circle → ellipse → escape) follows from launch speed; Kepler II (equal areas) and III (T² ∝ a³) emerge; escape is decided by the sign of the total energy E = K + U on the potential-well diagram.
+
+**Changes this review:**
+- **View auto-fit + framing.** Added a world→screen zoom+pan that fits and centers the predicted orbit's bounding box, so orbits fill the frame and the planet slides off-center (e.g. right when apoapsis extends left) instead of shooting off the edge. Pan is clamped so the planet always stays visible; unbound launches get their own planet-centered framing so escapes leave cleanly rather than vanishing. Click-to-launch inverts the full transform.
+- **Dotted predicted ellipse** drawn from the eccentricity vector (correct for tilted click-launches), plus an on-canvas legend distinguishing the predicted orbit from the traced path.
+- **Escape lab fixes:** EscapeLab now relaunches on slider change (it didn't, so the live energy was stale at +0); the banner/sign read the exact launch energy; the potential-well U-axis is focused on the launch-potential region so a small E > 0 sits visibly above U = 0; escape recolored red → green (blue = bound, gold = knife-edge, green = escape).
+- **Tone pass, both modes:** InfoPanels, status stamps, notes, banner labels, and plot title de-AI'd (no em-dashes or shouting caps).
+
+**Verdict:** ✅ Solidified (kepler + escape).
+
+### D30 · Angular Momentum Conservation — L29 (vector) · L30 (skater) · ✅ solidified
+
+**Route:** `/#/sp211/ch10-angular-momentum/conservation` (vector / skater)
+
+**Goal:** straight-line motion carries L = r × p about an off-path point (L = mvb, set by the chosen axis); a torque makes dL/dt = τ. Skater: pulling mass in drops I, so ω rises to keep L = Iω fixed while KE = L²/2I rises (work done pulling in); pushed to the extreme by a Crab-pulsar collapse.
+
+**Changes this review:**
+- **Neutron-star spin-up fixed.** The core-radius slider mapped radius linearly across 20 km → 7×10⁵ km, so ω ∝ 1/r² stayed ≈ 0 for nearly the whole travel and then spiked. Now maps radius logarithmically (each step scales r and ω by a constant factor), and the star's on-screen spin runs on a compressed scale (∝ orders of magnitude of spin-up) so the collapse reads as a smooth ramp; the readout and an on-canvas note still report the true rate.
+- **Tone pass, both modes:** rewrote both InfoPanels and the on-canvas/JSX notes; removed em-dashes and shouting caps (`RISES`, `NOT`, `ALONG`, `PERPENDICULAR`), the "exam trap"/"question everyone misses" framing, and stray casual phrasing.
+
+**Verdict:** ✅ Solidified (vector + skater).
 
 ### D28 · Rolling Race — L28 · ✅ solidified
 
