@@ -111,6 +111,19 @@ function motionFromOmega(omegaGrid) {
   return { t, th, w: omegaGrid, a };
 }
 
+// Linearly interpolate a motion's θ/ω at a continuous time t (s), so the disk can
+// play back smoothly between the N discrete samples instead of stepping.
+function sampleAt(motion, t) {
+  const f = Math.max(0, Math.min(N - 1, (t / T) * (N - 1)));
+  const i0 = Math.floor(f);
+  const i1 = Math.min(N - 1, i0 + 1);
+  const frac = f - i0;
+  return {
+    th: motion.th[i0] + frac * (motion.th[i1] - motion.th[i0]),
+    w: motion.w[i0] + frac * (motion.w[i1] - motion.w[i0]),
+  };
+}
+
 const DEFAULTS = { preset: 'spin-brake', radius: 0.5 };
 
 // ── hook-free wrapper: dispatch to the per-mode child (owns all hooks) ────────
@@ -137,6 +150,7 @@ function DefaultMode() {
     setPreset(DEFAULTS.preset); setScrub(0); setPlaying(false);
     setRadius(DEFAULTS.radius); setShowGhost(false); setShowArea(false);
     setFlick(null);
+    tRef.current = 0;
   };
 
   // The rotation for the current preset — unless the student has flicked the
@@ -147,15 +161,26 @@ function DefaultMode() {
     return integrate(p.theta0, p.omega0, p.alpha);
   }, [preset, flick]);
 
-  // Play: advance the scrub line at ~16 fps and loop.
-  const playRef = useRef();
+  // Play: a continuous rAF clock sweeps the window in ~6 s. It advances tRef every
+  // frame (the disk draw loop reads it for smooth 60 fps motion) and pushes the
+  // React scrub at ~30 fps, which is plenty for the plot cursor without thrashing
+  // Plotly. Manual scrubbing and reset keep tRef in sync (see below).
   useEffect(() => {
     if (!playing) return;
-    const step = T / 90; // ~6 s to sweep the window
-    playRef.current = setInterval(() => {
-      setScrub((s) => (s >= T ? 0 : Math.min(T, s + step)));
-    }, 66);
-    return () => clearInterval(playRef.current);
+    tRef.current = scrubRef.current; // resume from wherever the scrub sits
+    let raf, last, lastPush = 0;
+    const sweep = T / 6; // time-units per real second → ~6 s to cross the window
+    const tick = (nowMs) => {
+      if (last === undefined) last = nowMs;
+      const dt = Math.min(0.05, (nowMs - last) / 1000);
+      last = nowMs;
+      tRef.current += dt * sweep;
+      if (tRef.current >= T) tRef.current = 0; // loop
+      if (nowMs - lastPush > 33) { lastPush = nowMs; setScrub(tRef.current); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [playing]);
 
   // Sample the motion at the scrub time.
@@ -186,6 +211,18 @@ function DefaultMode() {
   // Rim velocity arrow length (px, ∝ |v_rim|), capped for the canvas.
   const rimArrowLenRef = useRef(0);
   rimArrowLenRef.current = Math.min(70, Math.abs(vRim) * 12);
+  // Live refs so the rAF draw loop can run a continuous 60 fps play clock without
+  // re-subscribing: it samples the current motion at a smoothly advancing time
+  // instead of snapping to the ~30 fps React scrub state (which drives the plot).
+  const motionRef = useRef(motion);
+  motionRef.current = motion;
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
+  const radiusRef = useRef(radius);
+  radiusRef.current = radius;
+  const scrubRef = useRef(scrub);
+  scrubRef.current = scrub;
+  const tRef = useRef(0); // continuous play-clock time (s), owned by the play loop
 
   // ── flick capture: drag the rim to spin the disk directly ──────────────────
   // While dragging we integrate the pointer's angular velocity into a live
@@ -219,9 +256,19 @@ function DefaultMode() {
       const rimPx = Math.min(W, H) * 0.40; // pixels for r = R
       const halfPx = rimPx / 2;            // pixels for r = R/2
       geomRef.current = { cx, cy, rimPx };
-      // During a flick we draw the live recorded angle; otherwise the scrub angle.
-      const ang = draggingRef.current && recRef.current ? recRef.current.ang : angleRef.current;
-      const om = draggingRef.current && recRef.current ? recRef.current.liveW || 0 : omegaRef.current;
+      // Pick the angle/ω to draw: a live flick wins; during playback we sample the
+      // motion at the smooth play-clock time (60 fps, not the 30 fps scrub state);
+      // when paused or scrubbing we use the scrub-derived values.
+      let ang, om;
+      if (draggingRef.current && recRef.current) {
+        ang = recRef.current.ang;
+        om = recRef.current.liveW || 0;
+      } else if (playingRef.current) {
+        const s = sampleAt(motionRef.current, tRef.current);
+        ang = s.th; om = s.w;
+      } else {
+        ang = angleRef.current; om = omegaRef.current;
+      }
 
       // background
       ctx.clearRect(0, 0, W, H);
@@ -284,8 +331,8 @@ function DefaultMode() {
       // Both dots share the same ω, but the rim arrow is twice as long (v = r·ω).
       // FIX: the arrow direction now follows the SIGN of ω — for ω<0 the tangent
       // reverses, so a braking/reversing disk shows a correctly flipped v arrow.
-      const arrowLen = draggingRef.current
-        ? Math.min(70, Math.abs(R * om) * 12)
+      const arrowLen = (draggingRef.current || playingRef.current)
+        ? Math.min(70, Math.abs(radiusRef.current * om) * 12)
         : rimArrowLenRef.current;
       const spin = om >= 0 ? 1 : -1;
       drawTangentArrow(ctx, rx, ry, ang, arrowLen, spin, GOLD);
@@ -549,7 +596,7 @@ function DefaultMode() {
             <span className="text-usna-muted text-xs">scrub the timeline</span>
           </div>
           <Slider label="Time (t)" value={Number(scrub.toFixed(1))} min={0} max={T} step={0.1} unit="s"
-                  onChange={(v) => { setPlaying(false); setScrub(v); }} />
+                  onChange={(v) => { setPlaying(false); setScrub(v); tRef.current = v; }} />
         </div>
 
         <div className="mt-2 border-t border-usna-grid pt-3">
@@ -597,7 +644,7 @@ function DefaultMode() {
             </div>
             <div className="text-usna-muted text-xs mt-1">
               Both dots share the disk's single ω, yet the rim dot travels twice as
-              far each turn — because v = r·ω. Drag the rim to flick your own spin.
+              far each turn, because v = r·ω. Drag the rim to flick your own spin.
             </div>
           </div>
         </div>
@@ -691,8 +738,8 @@ function drawTangentArrow(ctx, px, py, ang, len, spin, color) {
 }
 
 const INFO = {
-  title: 'Week 1, again — in Greek',
+  title: 'Week one again, in Greek letters',
   description:
-    'Angle, angular velocity, and angular acceleration share one time axis, so the derivative relationships that governed x, v, a return unchanged: ω is the slope of θ, α is the slope of ω, and θ is the accumulated area under ω. Flip on the D01 ghost overlay and the Latin twin (x, v, a) is literally the same figure, dimmed behind the Greek curves — the isomorphism in one glance. Turn on "Area = θ · slope = ω" to shade ∫ω dt under ω(t) (= θ) and drop the tangent-slope triangle on θ(t) (slope = ω), exactly the area grammar from week 1. On "Spin-up, then brake," α flips sign at the midpoint — but θ keeps increasing right up until ω reaches zero, just like "up and back" in 1D motion. The spinning disk closes the loop to the linear world: both painted dots share the disk\'s single ω, yet the rim dot moves at twice the linear speed of the inner dot, because v = r·ω — slide the rim radius and v_rim scales while ω does not. Or drag the rim yourself: the disk records your hand\'s angular velocity and rebuilds θ/ω/α from your own motion.',
+    'Angle, angular velocity, and angular acceleration share one time axis, so the derivative relationships that governed x, v, and a carry over unchanged: ω is the slope of θ, α is the slope of ω, and θ is the accumulated area under ω. Turn on the D01 ghost overlay and the Latin twin (x, v, a) appears as the same figure dimmed behind the Greek curves, so the correspondence is visible directly. Turn on "Area = θ, slope = ω" to shade ∫ω dt under ω(t), which equals θ, and to draw the tangent-slope triangle on θ(t), whose slope is ω, the same area grammar as week one. On "Spin-up, then brake," α flips sign at the midpoint, yet θ keeps increasing until ω reaches zero, just like "up and back" in 1D motion. The spinning disk ties this back to linear motion: both painted dots share the disk\'s single ω, but the rim dot moves at twice the linear speed of the inner dot because v = r·ω. Slide the rim radius and v_rim scales while ω does not, or drag the rim to record your own angular velocity and rebuild θ/ω/α from that motion.',
   equation: String.raw`\omega = \frac{d\theta}{dt}, \quad \alpha = \frac{d\omega}{dt}, \quad \theta = \int_0^t \omega\,dt, \quad v = r\,\omega`,
 };

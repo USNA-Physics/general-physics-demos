@@ -188,6 +188,22 @@ function fmtC(c) {
   return c.toString();
 }
 
+// Symbolic moment-of-inertia formula for a body: coefficient · m · r² (rods use
+// L, since their coefficient is defined about the length, not a radius).
+function formulaFor(shp) {
+  const sym = shp.rolls ? 'r' : 'L';
+  const v = shp.cInertia;
+  let coef;
+  if (Math.abs(v - 1) < 1e-6) coef = '';
+  else if (Math.abs(v - 0.5) < 1e-6) coef = '(1/2)';
+  else if (Math.abs(v - 2 / 3) < 1e-6) coef = '(2/3)';
+  else if (Math.abs(v - 0.4) < 1e-6) coef = '(2/5)';
+  else if (Math.abs(v - 1 / 3) < 1e-6) coef = '(1/3)';
+  else if (Math.abs(v - 1 / 12) < 1e-6) coef = '(1/12)';
+  else coef = `(${fmtC(v)})`;
+  return `I = ${coef}m${sym}²`;
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // SHAPES MODE (L25)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -318,7 +334,7 @@ function ShapesGallery() {
       ctx.clearRect(0, 0, W, H);
       const cols = 3, rows = 2;
       const cellW = W / cols, cellH = H / rows;
-      const R = Math.min(cellW, cellH) * 0.28;
+      const R = Math.min(cellW, cellH) * 0.26;
       const { mass: m, radius: r } = params.current;
       const selKey = selRef.current.selected;
 
@@ -371,12 +387,16 @@ function ShapesGallery() {
         ctx.font = '12px JetBrains Mono, monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillText(shp.label, cx, cy + R + 12);
+        ctx.fillText(shp.label, cx, cy + R + 11);
+        // symbolic moment-of-inertia formula for this body
+        ctx.fillStyle = isSel ? GOLD : hexA(GOLD, 0.8);
+        ctx.fillText(formulaFor(shp), cx, cy + R + 25);
+        // live numeric value and current spin rate
         ctx.fillStyle = MUTED;
         ctx.font = '11px JetBrains Mono, monospace';
         ctx.fillText(
-          `I=${I.toFixed(3)}  ω=${Math.abs(omega.current[i]).toFixed(1)}`,
-          cx, cy + R + 28,
+          `= ${I.toFixed(3)}   ω=${Math.abs(omega.current[i]).toFixed(1)}`,
+          cx, cy + R + 39,
         );
       });
 
@@ -482,7 +502,7 @@ function ShapesGallery() {
                     : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
                 }`}
               >
-                {s.label} <span className="opacity-70 text-xs">c={fmtC(s.cInertia)}</span>
+                {s.label} <span className="opacity-70 text-xs">{formulaFor(s)}</span>
               </button>
             ))}
           </div>
@@ -500,7 +520,7 @@ function ShapesGallery() {
         </button>
         <p className="text-usna-muted text-xs mb-4 leading-relaxed">
           Same J to each → Δω = J / I. First body to spin {FINISH_TURNS} turns past its
-          finish spoke wins — the hoop (big I) starts slow and loses; the sphere leaps.
+          finish spoke wins. The hoop (big I) starts slow and loses; the sphere pulls ahead.
         </p>
 
         <div className="border-t border-usna-grid pt-3">
@@ -519,12 +539,12 @@ function ShapesGallery() {
                style={{ background: hexA(GREEN, 0.14), borderColor: GREEN, color: TEXT }}>
             🏆 Winner: <span style={{ color: GREEN }}>{byKey[winner].label}</span>
             <span className="font-normal text-usna-muted">
-              — smallest I = {inertia(byKey[winner].cInertia, mass, radius).toFixed(3)} kg·m², so the same J spins it up fastest.
+              smallest I = {inertia(byKey[winner].cInertia, mass, radius).toFixed(3)} kg·m², so the same J spins it up fastest.
             </span>
           </div>
         )}
         <div ref={wrapRef} className="border border-usna-grid rounded-lg min-w-0 overflow-hidden"
-             style={{ height: 360, background: DEEP }}>
+             style={{ height: 430, background: DEEP }}>
           <canvas ref={canvasRef} className="block" />
         </div>
         <div className="flex flex-col sm:flex-row gap-4">
@@ -537,7 +557,7 @@ function ShapesGallery() {
             <p className="text-usna-muted text-xs leading-relaxed mb-2">{sel.note}</p>
             <p className="text-usna-text text-xs leading-relaxed">
               Drag the axis off center and the M d² term (red ring) piles inertia on top of
-              I_cm — at d = R it can rival I_cm itself.
+              I_cm; at d = R it can rival I_cm itself.
             </p>
           </div>
         </div>
@@ -727,7 +747,7 @@ function PointMassBuilder() {
           <Readout label="effective c = I/(MR²)" value={cEff.toFixed(3)} unit="" />
         </div>
         <p className="text-usna-muted text-xs mt-3 leading-relaxed">
-          Each mass adds its own m r² to the pile — far masses count for much more (r²).
+          Each mass adds its own m r² to the pile, and far masses count for much more (r²).
           Stack a ring at the rim (c → 1, a hoop) or pile mass near the axis (small c).
           The "smear" slider collapses your points into a uniform disk of the same mass
           and outer radius; that is where I = ½ M R² comes from.
@@ -918,6 +938,48 @@ function TorqueMode() {
       ctx.textBaseline = 'top';
       ctx.fillText(`τ = ${tq.toFixed(1)} N·m`, W - 12, 12);
 
+      // --- twist gauge: a curved arrow around the bolt whose sweep shows the
+      // torque being applied. The bolt is tight, so the wrench does not actually
+      // turn it; the handle flexes by an amount set by τ and relaxes back to level
+      // when the torque eases. This is what "moves the arm" and returns it. ---
+      const twMag = Math.min(1.7, Math.abs(tq) * 0.045);
+      if (twMag > 0.05) {
+        const dir = tq >= 0 ? 1 : -1;           // canvas +angle sweeps clockwise
+        const rad = 40;
+        const a0 = -Math.PI / 2 - dir * 0.15;   // start near the top of the bolt
+        const a1 = a0 + dir * twMag;
+        ctx.strokeStyle = hexA(GOLD, 0.9);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad, a0, a1, dir < 0);
+        ctx.stroke();
+        // arrowhead at the leading end, pointing along the arc's tangent
+        const hx = cx + rad * Math.cos(a1), hy = cy + rad * Math.sin(a1);
+        const tx = dir * -Math.sin(a1), ty = dir * Math.cos(a1); // unit tangent
+        const hs = 9;
+        const bx = hx - tx * hs, by = hy - ty * hs;
+        ctx.fillStyle = hexA(GOLD, 0.9);
+        ctx.beginPath();
+        ctx.moveTo(hx, hy);
+        ctx.lineTo(bx - ty * hs * 0.6, by + tx * hs * 0.6);
+        ctx.lineTo(bx + ty * hs * 0.6, by - tx * hs * 0.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = hexA(GOLD, 0.95);
+        ctx.font = 'bold 12px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('twist τ', cx, cy - rad - 8);
+      }
+
+      // caption: explain the flex-and-return so the motion is not mysterious
+      ctx.fillStyle = hexA(TEXT, 0.7);
+      ctx.font = '11px JetBrains Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('The bolt is tight: the wrench flexes by the torque you apply', 12, H - 26);
+      ctx.fillText('and springs back to level as the torque eases (lower F, or θ → 0°).', 12, H - 12);
+
       raf = requestAnimationFrame(draw);
     };
 
@@ -942,9 +1004,11 @@ function TorqueMode() {
           <Readout label="Torque τ = r F⊥" value={torque.toFixed(2)} unit="N·m" />
         </div>
         <p className="text-usna-muted text-xs mt-3 leading-relaxed">
-          Slide θ to 0° (pull straight along the wrench): F is huge but it is <em>all</em> F∥
-          (gray, along the handle) and F⊥ (green) is zero, so τ = 0. Two equivalent pictures:
-          the perpendicular lever arm r⊥ (gold), or the perpendicular force F⊥ — both give τ = r F sinθ.
+          The bolt is tight, so the wrench does not spin it; the handle flexes by the torque you
+          apply (the gold twist gauge) and returns to level as the torque eases. Slide θ to 0°
+          (pull straight along the wrench): F is huge but it is <em>all</em> F∥ (gray, along the
+          handle) and F⊥ (green) is zero, so τ = 0. Two equivalent pictures: the perpendicular
+          lever arm r⊥ (gold), or the perpendicular force F⊥, both give τ = r F sinθ.
         </p>
       </ControlPanel>
 
@@ -1072,7 +1136,7 @@ function TorquePlayground() {
       ctx.fillText(`α = ${live.current.alpha.toFixed(2)} rad/s²`, 12, 30);
       if (Math.abs(omega.current) >= OMEGA_MAX - 1e-6) {
         ctx.fillStyle = RED;
-        ctx.fillText(`⤒ ω capped at ${OMEGA_MAX} rad/s — reset to run again`, 12, 48);
+        ctx.fillText(`⤒ ω capped at ${OMEGA_MAX} rad/s · reset to run again`, 12, 48);
       }
 
       raf = requestAnimationFrame(draw);
@@ -1101,7 +1165,7 @@ function TorquePlayground() {
                     : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
                 }`}
               >
-                {s.label} <span className="opacity-70 text-xs">c={fmtC(s.cInertia)}</span>
+                {s.label} <span className="opacity-70 text-xs">{formulaFor(s)}</span>
               </button>
             ))}
           </div>
@@ -1338,8 +1402,8 @@ function AtwoodPulley() {
           <Readout label="ΔT = T₁−T₂ = ½Mₚa" value={dT.toFixed(2)} unit="N" />
         </div>
         <p className="text-usna-muted text-xs mt-3 leading-relaxed">
-          Crank the pulley mass up: the blocks visibly slow. The two cord tensions split apart
-          (T₁ ≠ T₂ on the canvas) because the pulley needs a net torque ΔT·rₚ to spin up — that is
+          Raise the pulley mass and the blocks visibly slow. The two cord tensions split apart
+          (T₁ ≠ T₂ on the canvas) because the pulley needs a net torque ΔT·rₚ to spin up, which is
           the mechanism its inertia acts through. Set Mₚ = 0 and ΔT → 0, T₁ = T₂, and a recovers
           the textbook g(m₁−m₂)/(m₁+m₂).
         </p>
@@ -1361,25 +1425,25 @@ const INFO = {
   shapes: {
     title: 'It is where the mass is, not how much',
     description:
-      'Two bodies with the exact same mass and radius can be wildly different to spin. Flick them with the same torque impulse and the hoop — all its mass at the rim, I = mr² — crawls, while the solid sphere (I = 0.4 mr²) leaps ahead. The density shading shows why: pushing mass outward multiplies its r², and I grows with r². The parallel-axis view adds the M d² penalty for spinning about any axis other than the center of mass.',
+      'Two bodies with the same mass and radius can be very different to spin. Give them the same torque impulse and the hoop, with all its mass at the rim (I = mr²), speeds up slowly, while the solid sphere (I = 0.4 mr²) pulls ahead. The density shading shows why: moving mass outward multiplies its r², and I grows with r². The parallel-axis view adds the M d² penalty for spinning about any axis other than the center of mass.',
     equation: String.raw`I = c\,m r^2, \qquad I = I_{cm} + M d^2`,
   },
   torque: {
     title: 'Torque needs the perpendicular lever arm',
     description:
-      'Two equivalent ways to see τ = r F sinθ. (1) Lever-arm picture: force times the PERPENDICULAR distance from the axis to the line of action, r⊥ = r sinθ (the gold dashed segment). (2) Component picture: resolve F into F∥ = F cosθ (gray, straight along the handle — wasted, no torque) and F⊥ = F sinθ (green, square to the handle — this is the part that does the turning), then τ = r F⊥. Pull straight along the wrench (θ = 0) and F is all F∥: zero lever arm, zero F⊥, zero torque. Maximum torque comes at θ = 90°, force square to the handle.',
+      'There are two equivalent ways to read τ = r F sinθ. First, the lever-arm picture: force times the perpendicular distance from the axis to the line of action, r⊥ = r sinθ (the gold dashed segment). Second, the component picture: resolve F into F∥ = F cosθ (gray, along the handle, which does no turning) and F⊥ = F sinθ (green, square to the handle, which does the turning), so τ = r F⊥. Pull straight along the wrench (θ = 0) and F is all F∥: zero lever arm, zero F⊥, zero torque. Maximum torque comes at θ = 90°, with the force square to the handle.',
     equation: String.raw`\tau = r F \sin\theta = r_\perp F = r F_\perp`,
   },
   builder: {
     title: 'Where the constant c comes from: I = Σ mᵢ rᵢ²',
     description:
-      'Moment of inertia is just the mass-weighted sum of r² over the body. Drop point masses at chosen radii and each contributes its own mᵢ rᵢ² — a mass twice as far out counts four times as much. Pile mass at the rim and the effective c → 1 (a hoop); pile it near the axis and c is small. The "smear" slider then collapses your discrete cloud into a uniform solid disk of the same total mass and outer radius, and the same number reappears as I = ½ M R². The textbook constant c is nothing but ⟨r²⟩/R² for the shape.',
+      'Moment of inertia is the mass-weighted sum of r² over the body. Drop point masses at chosen radii and each contributes its own mᵢ rᵢ², so a mass twice as far out counts four times as much. Pile mass at the rim and the effective c approaches 1 (a hoop); pile it near the axis and c is small. The "smear" slider then collapses your discrete cloud into a uniform solid disk of the same total mass and outer radius, and the same number reappears as I = ½ M R². The textbook constant c is just ⟨r²⟩/R² for the shape.',
     equation: String.raw`I = \sum_i m_i r_i^2 \;\xrightarrow{\text{continuous}}\; \int r^2\,dm = c\,M R^2`,
   },
   dynamics: {
-    title: 'Στ = Iα — the rotational F = ma',
+    title: 'Στ = Iα, the rotational F = ma',
     description:
-      'The same applied torque produces different angular accelerations on different bodies, because α = τ / I. I is the rotational mass: it measures resistance to angular acceleration. A hoop and a sphere of identical mass and radius spin up at different rates under one torque — the hoop is the sluggish one.',
+      'The same applied torque produces different angular accelerations on different bodies, because α = τ / I. I is the rotational mass: it measures resistance to angular acceleration. A hoop and a sphere of identical mass and radius spin up at different rates under one torque, and the hoop is the slower of the two.',
     equation: String.raw`\sum \tau = I \alpha \;\Rightarrow\; \alpha = \frac{\tau}{I}`,
   },
   atwood: {

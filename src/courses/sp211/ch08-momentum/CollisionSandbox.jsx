@@ -54,8 +54,16 @@ const DEEP = '#0D1321';
 
 // A short synthesized "click" at contact (Web Audio). Lazily created & shared.
 let _audioCtx = null;
-function clickSound(gainScale = 1) {
+// Contact sound is opt-in (off by default): a checkbox in each mode flips this
+// shared flag, so clickSound stays silent until the user asks for it.
+let _soundEnabled = false;
+function setSoundEnabled(on) { _soundEnabled = on; }
+// hardness (0..1) shapes the timbre: 1 = a rigid, bright, quick rap; 0 = a soft,
+// low, slightly longer thud. Pass null (the default) to keep the plain cart/ball
+// knock used by the 1D and 2D modes unchanged.
+function clickSound(gainScale = 1, hardness = null) {
   try {
+    if (!_soundEnabled) return;
     if (typeof window === 'undefined') return;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
@@ -65,15 +73,25 @@ function clickSound(gainScale = 1) {
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+    let fStart = 220, fEnd = 90, dur = 0.09, rampFrac = 0.55, stopAt = 0.1;
     osc.type = 'square';
-    osc.frequency.setValueAtTime(220, now);
-    osc.frequency.exponentialRampToValueAtTime(90, now + 0.05);
+    if (hardness !== null) {
+      const h = Math.max(0, Math.min(1, hardness));
+      osc.type = h > 0.45 ? 'square' : 'triangle';
+      fStart = 120 + 260 * h;   // 120 Hz (soft cushion) … 380 Hz (rigid wall)
+      fEnd = 55 + 55 * h;       // 55 … 110 Hz
+      dur = 0.16 - 0.08 * h;    // a soft contact rings a touch longer than a rigid rap
+      rampFrac = 0.6;
+      stopAt = dur + 0.02;
+    }
+    osc.frequency.setValueAtTime(fStart, now);
+    osc.frequency.exponentialRampToValueAtTime(fEnd, now + dur * rampFrac);
     const g = Math.max(0.02, Math.min(0.28, 0.22 * gainScale));
     gain.gain.setValueAtTime(g, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
     osc.connect(gain).connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.1);
+    osc.stop(now + stopAt);
   } catch {
     /* audio is a nicety; never let it break the sim */
   }
@@ -128,6 +146,7 @@ function OneDMode() {
   const [playing, setPlaying] = useState(true);
   const [trails, setTrails] = useState(true);
   const [comFrame, setComFrame] = useState(false); // WOW: center-of-mass frame
+  const [sound, setSound] = useState(_soundEnabled);
 
   // Live post-collision velocities pushed from the rAF loop (throttled).
   const [live, setLive] = useState({ vA: D1.vA, vB: D1.vB, collided: false });
@@ -160,7 +179,20 @@ function OneDMode() {
   const keB = 0.5 * mB * live.vB * live.vB;
   const keNow = keA + keB;
 
-  const pScale = Math.max(1, Math.abs(pA) + Math.abs(pB), Math.abs(pTotal)) * 1.05;
+  // Fixed momentum axis, independent of e and of the live sim state. If the axis
+  // tracked the live bars, elastic collisions (which grow the individual momenta)
+  // would rescale it and make the conserved Σp bar appear to move. We size it once
+  // from the extremes the bars can reach: the pre-impact momenta, the stuck (e=0)
+  // split, and the elastic (e=1) rebound — so the Σp bar and its constant-total
+  // line stay put at every elasticity.
+  const { vAf: vAe, vBf: vBe } = resolve1D(mA, mB, vA, vB, 1);
+  const pScale = Math.max(
+    1,
+    Math.abs(mA * vA), Math.abs(mB * vB),
+    Math.abs(mA * vCom), Math.abs(mB * vCom),
+    Math.abs(mA * vAe), Math.abs(mB * vBe),
+    Math.abs(pTotal),
+  ) * 1.15;
   const keScale = Math.max(0.001, keBefore) * 1.05;
 
   useEffect(() => {
@@ -412,6 +444,10 @@ function OneDMode() {
           <input type="checkbox" checked={comFrame} onChange={(ev) => setComFrame(ev.target.checked)} className="accent-usna-gold" />
           Center-of-mass frame (Σp ≡ 0)
         </label>
+        <label className="flex items-center gap-2 text-usna-text text-sm mb-1 cursor-pointer">
+          <input type="checkbox" checked={sound} onChange={(ev) => { setSound(ev.target.checked); setSoundEnabled(ev.target.checked); }} className="accent-usna-gold" />
+          Contact sound
+        </label>
 
         <div className="mt-3 border-t border-usna-grid pt-3">
           <Readout label="Total p (lab, any e)" value={pTotal.toFixed(2)} unit="kg·m/s" />
@@ -445,7 +481,7 @@ function OneDMode() {
             />
             <p className="text-usna-muted text-xs mt-2">
               The Σp bar sits on the constant-total line for every e.
-              {comFrame && ' In the COM frame the total is zero — yet KE still drops.'}
+              {comFrame && ' In the COM frame the total is zero, yet KE still drops.'}
             </p>
           </div>
           {/* kinetic energy: per-cart + total, no constant marker (it drops) */}
@@ -522,6 +558,7 @@ function ImpulseMode() {
   const [playing, setPlaying] = useState(true);
 
   const [scrub, setScrub] = useState(0);       // 0..1 fraction of contact done
+  const [sound, setSound] = useState(_soundEnabled);
 
   const reset = () => {
     setM(D2.m); setV0(D2.v0); setCushion(D2.cushion); setShape(D2.shape); setPlaying(true);
@@ -608,7 +645,8 @@ function ImpulseMode() {
       if (p.playing) {
         phaseT += dt;
         if (phase === 'approach') {
-          // approach in ~0.9 s regardless
+          // approach in ~0.9 s; contact has not begun, so the plot and gauge sit at zero
+          scrubRef.current = 0;
           const frac = Math.min(1, phaseT / 0.9);
           carX = startX + (wallX - carW - startX) * easeOut(frac);
           if (frac >= 1) { phase = 'contact'; phaseT = 0; clicked = false; scrubRef.current = 0; }
@@ -616,7 +654,8 @@ function ImpulseMode() {
           // slow-motion: play the contact over ~1.6 s of wall-clock
           const frac = Math.min(1, phaseT / 1.6);
           scrubRef.current = frac;
-          if (!clicked) { clicked = true; clickSound(1 - p.cushion * 0.6); }
+          // rigid wall → a louder, sharper rap; more cushion → a softer, duller thud
+          if (!clicked) { clicked = true; const hard = 1 - p.cushion; clickSound(0.55 + 0.65 * hard, hard); }
           // small crush toward the wall then back
           carX = (wallX - carW) + 6 * Math.sin(Math.PI * frac);
           if (frac >= 1) { phase = 'recede'; phaseT = 0; }
@@ -779,7 +818,7 @@ function ImpulseMode() {
               </button>
             ))}
           </div>
-          <p className="text-usna-muted text-xs mt-1">Others show as ghosts — same Δp, different peak.</p>
+          <p className="text-usna-muted text-xs mt-1">Others show as ghosts: same Δp, different peak.</p>
         </div>
 
         <div className="flex items-center gap-2 mb-2">
@@ -793,6 +832,10 @@ function ImpulseMode() {
         </div>
         <Slider label="Contact progress" value={Number(scrub.toFixed(2))} min={0} max={1} step={0.01} unit=""
                 onChange={(v) => { setPlaying(false); scrubRef.current = v; setScrub(v); }} />
+        <label className="flex items-center gap-2 text-usna-text text-sm mt-2 cursor-pointer">
+          <input type="checkbox" checked={sound} onChange={(ev) => { setSound(ev.target.checked); setSoundEnabled(ev.target.checked); }} className="accent-usna-gold" />
+          Impact sound
+        </label>
 
         <div className="mt-2 border-t border-usna-grid pt-3">
           <Readout label="Δp = m·v₀" value={dpMag.toFixed(0)} unit="kg·m/s" />
@@ -838,7 +881,7 @@ function ImpulseMode() {
             <span>{gaugeMax.toFixed(0)} g</span>
           </div>
           <p className="text-usna-muted text-xs mt-2">
-            The peak marker slides left as you add cushion or soften the profile — the airbag argument, in g.
+            The peak marker slides left as you add cushion or soften the profile: the airbag argument, in g.
           </p>
         </div>
 
@@ -868,6 +911,7 @@ function TwoDMode() {
   const [b, setB] = useState(D3.b);            // impact parameter, 0..1 (× radius sum)
   const [e, setE] = useState(D3.e);
   const [playing, setPlaying] = useState(true);
+  const [sound, setSound] = useState(_soundEnabled);
 
   const reset = () => {
     setM1(D3.m1); setM2(D3.m2); setV0(D3.v0); setB(D3.b); setE(D3.e); setPlaying(true);
@@ -1074,27 +1118,42 @@ function TwoDMode() {
       ctx = setupCanvas(canvas, W, H);
       ctx.clearRect(0, 0, W, H);
 
-      // scale so p_in spans most of the width; +y up (physics) → negate for canvas
-      const mag = Math.max(Math.abs(pxIn), Math.hypot(p1x, p1y) + Math.hypot(p2x, p2y), 1e-6);
-      const sc = (W * 0.72) / mag;
-      const ox = W * 0.14, oy = H * 0.5;   // origin (tail of p_in)
-      const CY = (py) => oy - py * sc;     // physics +y up
+      // Fit the whole triangle (all vertices) inside the panel, scaling by both
+      // width and height so a steep outgoing arrow never clips off the bottom.
+      const verts = [
+        [0, 0],                   // tail of p_in
+        [pxIn, pyIn],             // tip of p_in
+        [p1x, p1y],               // tip of p₁
+        [p1x + p2x, p1y + p2y],   // closure (should land on p_in's tip)
+      ];
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const [vx, vy] of verts) {
+        if (vx < minX) minX = vx; if (vx > maxX) maxX = vx;
+        if (vy < minY) minY = vy; if (vy > maxY) maxY = vy;
+      }
+      const bw = Math.max(maxX - minX, 1e-6), bh = Math.max(maxY - minY, 1e-6);
+      // margin leaves room for arrowheads and labels on every side
+      const sc = Math.min((W * 0.78) / bw, (H * 0.70) / bh);
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      const SXp = (px) => W / 2 + (px - cx) * sc;   // physics +x → canvas +x
+      const SYp = (py) => H / 2 - (py - cy) * sc;   // physics +y up → canvas −y
+      const ox = SXp(0), oy = SYp(0);               // origin (tail of p_in)
 
-      // faint axes
+      // faint horizontal reference through the p_in tail
       ctx.strokeStyle = 'rgba(26,35,50,0.9)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
 
       // p_in (the target the triangle must close on) — bright reference
-      drawArrow(ctx, { x: ox, y: CY(0), dx: pxIn * sc, dy: 0, color: GREEN, width: 3.5, head: 12, label: 'p_in' });
+      drawArrow(ctx, { x: ox, y: oy, dx: pxIn * sc, dy: -pyIn * sc, color: GREEN, width: 3.5, head: 12, label: 'p_in' });
 
       // p1_out from the origin
-      drawArrow(ctx, { x: ox, y: CY(0), dx: p1x * sc, dy: -p1y * sc, color: GOLD, width: 3, head: 11, label: 'p₁' });
+      drawArrow(ctx, { x: ox, y: oy, dx: p1x * sc, dy: -p1y * sc, color: GOLD, width: 3, head: 11, label: 'p₁' });
       // p2_out from the tip of p1_out (tip-to-tail) → lands on the tip of p_in
-      const tipX = ox + p1x * sc, tipY = CY(p1y);
+      const tipX = SXp(p1x), tipY = SYp(p1y);
       drawArrow(ctx, { x: tipX, y: tipY, dx: p2x * sc, dy: -p2y * sc, color: BLUE, width: 3, head: 11, label: 'p₂' });
 
       // closure dot: where p1+p2 ends should coincide with p_in's tip
-      const endX = tipX + p2x * sc, endY = tipY - p2y * sc;
+      const endX = SXp(p1x + p2x), endY = SYp(p1y + p2y);
       ctx.fillStyle = TEXT;
       ctx.beginPath(); ctx.arc(endX, endY, 4, 0, 2 * Math.PI); ctx.fill();
 
@@ -1142,6 +1201,10 @@ function TwoDMode() {
             ↺ Replay
           </button>
         </div>
+        <label className="flex items-center gap-2 text-usna-text text-sm mb-1 cursor-pointer">
+          <input type="checkbox" checked={sound} onChange={(ev) => { setSound(ev.target.checked); setSoundEnabled(ev.target.checked); }} className="accent-usna-gold" />
+          Contact sound
+        </label>
 
         <div className="mt-2 border-t border-usna-grid pt-3">
           <Readout label="Opening angle" value={outcome.openAngle.toFixed(0)} unit="°" />
@@ -1163,11 +1226,11 @@ function TwoDMode() {
         {/* vector-sum inset: the conservation triangle */}
         <div className="bg-usna-card border border-usna-grid rounded-lg p-4">
           <div className="text-usna-text text-sm font-medium mb-2">Momentum triangle</div>
-          <div ref={insetRef} className="relative min-w-0 overflow-hidden" style={{ height: 140 }}>
+          <div ref={insetRef} className="relative min-w-0 overflow-hidden" style={{ height: 170 }}>
             <canvas ref={insetCanvasRef} className="block" />
           </div>
           <p className="text-usna-muted text-xs mt-2">
-            Lay the two outgoing momenta tip-to-tail: they close exactly on the incoming p_in — momentum conservation as one triangle.
+            Lay the two outgoing momenta tip-to-tail: they close exactly on the incoming p_in, momentum conservation as one triangle.
           </p>
         </div>
 
@@ -1254,19 +1317,19 @@ const INFO = {
   '1d': {
     title: 'Two conservation laws, two behaviors',
     description:
-      'Momentum is conserved in every collision — the total-momentum (Σp) bar sits exactly on the constant-total line no matter how you set elasticity, and you can now drag the elasticity slider WHILE the carts are touching to watch the outcome re-resolve live. Kinetic energy is different: it is only conserved when e = 1. The stuck-together (e = 0) case loses the most energy, yet still carries the exact same momentum. Switch to the center-of-mass frame: there the total momentum is literally zero (the carts approach and recede symmetrically about the dashed line) and yet the KE bar STILL collapses — proof that the energy loss is frame-independent while the momentum "cancellation" is just a choice of reference frame.',
+      'Momentum is conserved in every collision. The total-momentum (Σp) bar sits exactly on the constant-total line no matter how you set elasticity, and you can drag the elasticity slider while the carts are touching to watch the outcome re-resolve live. Kinetic energy is different: it is only conserved when e = 1. The stuck-together (e = 0) case loses the most energy, yet still carries the exact same momentum. Switch to the center-of-mass frame and the total momentum is literally zero: the carts approach and recede symmetrically about the dashed line, and yet the KE bar still collapses. The energy loss is frame-independent, while the momentum cancellation is just a choice of reference frame.',
     equation: String.raw`\sum m_i v_i = \text{const always}, \qquad \sum \tfrac12 m_i v_i^2 = \text{const only if } e=1`,
   },
   impulse: {
     title: 'Same Δp, softer force — the airbag',
     description:
-      'The shaded area under the force–time curve is the impulse, and it equals the change in momentum Δp = m·v₀. That area is fixed by the crash: the wall must remove all of the car\'s momentum. Slide the cushion from rigid to soft and the contact time stretches — but because the area is fixed, the curve gets lower and wider, so the PEAK force plummets. The occupant g-gauge turns that peak into a number and colors it against a survivable band: a soft, spread-out contact keeps you in the green. And the three same-area profiles show it is not just duration — a rigid rectangular pulse peaks lower than a triangular crumple of the same length, because peak force depends on the SHAPE of F(t), not merely how long contact lasts.',
+      'The shaded area under the force–time curve is the impulse, and it equals the change in momentum Δp = m·v₀. That area is fixed by the crash: the wall must remove all of the car\'s momentum. Slide the cushion from rigid to soft and the contact time stretches. Because the area is fixed, the curve gets lower and wider, so the peak force plummets. The occupant g-gauge turns that peak into a number and colors it against a survivable band: a soft, spread-out contact keeps you in the green. The three same-area profiles show that duration is not the whole story: a rigid rectangular pulse peaks lower than a triangular crumple of the same length, because peak force depends on the shape of F(t), not merely how long contact lasts.',
     equation: String.raw`\vec{J} = \int \vec{F}\,dt = \Delta \vec{p} \;\Rightarrow\; F_{\text{peak}} \sim \frac{\Delta p}{\Delta t}`,
   },
   '2d': {
     title: 'x and y are conserved independently',
     description:
-      'Momentum conservation is a vector statement: the x-components conserve on their own and the y-components conserve on their own — for any elasticity and any mass ratio. The incoming ball has zero y-momentum, so after the glance the two balls carry equal-and-opposite vertical kicks that sum back to zero (watch the y-bar stay pinned to zero even for e < 1 with unequal masses). The momentum triangle makes it geometric: laying p₁_out and p₂_out tip-to-tail closes exactly on p_in. Load the equal-mass elastic preset: for any impact parameter the two balls leave at a 90° opening angle — the classic billiards / cue-ball fact — because with equal masses the outgoing velocity vectors must be perpendicular.',
+      'Momentum conservation is a vector statement: the x-components conserve on their own and the y-components conserve on their own, for any elasticity and any mass ratio. The incoming ball has zero y-momentum, so after the glance the two balls carry equal-and-opposite vertical kicks that sum back to zero (watch the y-bar stay pinned to zero even for e < 1 with unequal masses). The momentum triangle makes it geometric: laying p₁_out and p₂_out tip-to-tail closes exactly on p_in. Load the equal-mass elastic preset, and for any impact parameter the two balls leave at a 90° opening angle, the classic billiards and cue-ball fact, because with equal masses the outgoing velocity vectors must be perpendicular.',
     equation: String.raw`\sum p_x = \text{const}, \quad \sum p_y = \text{const}; \quad m_1=m_2,\,e=1 \Rightarrow \theta_1+\theta_2 = 90^\circ`,
   },
 };

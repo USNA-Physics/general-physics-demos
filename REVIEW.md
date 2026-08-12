@@ -26,7 +26,7 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L14 | D14 · Center of Mass Playground | `ch05-applications/cm` · default/tumbling | ✅ |
 | L15–L17 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ✅ |
 | L18–L20 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ✅ |
-| L21–L23 | D22 · Collision Sandbox | `ch08-momentum/collisions` · 1d/impulse/2d | ⬜ |
+| L21–L23 | D22 · Collision Sandbox | `ch08-momentum/collisions` · 1d/impulse/2d | ✅ |
 | L24 | D24 · Rotational Kinematics Grapher | `ch09-rotation/grapher` | ⬜ |
 | L25–L27 | D25 · Moment of Inertia Explorer | `ch09-rotation/inertia` · shapes/torque/dynamics | ⬜ |
 | L28 | D28 · Rolling Race | `ch09-rotation/rolling` | ⬜ |
@@ -41,6 +41,23 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D22 · Collision Sandbox — L21 (1d) · L22 (impulse) · L23 (2d) · ✅ solidified
+
+**Route:** `/#/sp211/ch08-momentum/collisions` (1d / impulse / 2d)
+
+**Goal:** momentum conserved in every collision while KE is only conserved for e = 1; impulse J = ∫F dt = Δp with a fixed area trading peak force for contact time (the airbag argument); 2D momentum conserved component-by-component, closing as one vector triangle (equal-mass elastic → 90°).
+
+**Changes this review:**
+- **Tracers softened** so the mass outlines stay readable: 1D trails dropped to a slim, low-alpha central streak and the carts gained a crisp outline; 2D trail dots shrunk and faded.
+- **Impulse mode synchronized:** the top animation, the g-gauge, and the F(t) fill now share one contact clock (scrub pinned to 0 through approach, 0→1 across contact, held full through recede) so all three evolve together.
+- **Cushion-aware sound:** a rigid wall gives a louder, brighter rap; more cushion gives a softer, lower thud (the 1D/2D cart knock is unchanged).
+- **1D momentum axis made e-independent:** it was auto-scaling from the live bars, so elastic collisions rescaled the chart and made the conserved Σp bar *appear* to move; now sized once from the pre/stuck/elastic extremes, so Σp sits on the constant-total line at every e.
+- **2D momentum triangle fit:** the inset now scales to the full triangle bounding box (both axes) and centers it, so a steep outgoing arrow no longer clips off the bottom; panel height bumped.
+- **Sound is opt-in:** off by default, with a per-mode "Contact/Impact sound" checkbox flipping a shared flag.
+- InfoPanels + on-canvas text de-AI'd (no em-dashes, no shouting caps).
+
+**Verdict:** ✅ Solidified (all three modes). **Chapter 8 complete.**
 
 ### D18 · Energy Landscape Explorer — L18 · L19 · L20 · ✅ solidified
 
