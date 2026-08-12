@@ -35,12 +35,34 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L33, L34 | D34 · Buoyancy Tank | `ch13-fluids/tank` · pressure/buoyancy | ✅ |
 | L35, L36 | D35 · SHM Explorer | `ch14-oscillations/shm` · spring/pendulum/double-spring/double-pendulum | ✅ |
 | L37, L38 | D37 · Traveling Wave Explorer | `ch15-waves/traveling` · transverse/longitudinal | ✅ |
-| L39 | D39 · Doppler Wavefront Visualizer | `ch15-waves/doppler` | ⬜ |
-| L40, L41 | D40 · Superposition Sandbox | `ch16-superposition/sandbox` · beats/standing | ⬜ |
+| L39 | D39 · Doppler Wavefront Visualizer | `ch15-waves/doppler` | ✅ |
+| L40, L41 | D40 · Superposition Sandbox | `ch16-superposition/sandbox` · beats/standing | ✅ |
 
 ---
 
 ## Review log
+
+### D39 · Doppler Wavefront Visualizer — L39 · ✅ solidified
+
+**Route:** `/#/sp211/ch15-waves/doppler`
+
+**Goal:** moving source/observer compress or stretch the wavefronts, shifting observed frequency (f′ = f (v ± v_o)/(v ∓ v_s)); the cone and shock at/above Mach 1.
+
+**Verdict:** ✅ Solidified. Reviewed and approved as-is (no changes). **All SP211 demos (D01–D40) are now solidified.**
+
+### D40 · Superposition Sandbox — L40 (beats) · L41 (standing) · ✅ solidified
+
+**Route:** `/#/sp211/ch16-superposition/sandbox` (beats / standing)
+
+**Goal:** two near-equal frequencies sum to a slow beat envelope at f_beat = |f₁−f₂| (and, with different k, traveling nodes at the group velocity); counter-propagating waves make standing waves with fixed nodes and KE↔PE exchange peaking at the flat instant.
+
+**Changes this review:**
+- **Beats calmed:** default lowered to f₁ = 0.75 / f₂ = 0.85 Hz (a beat shows on load) with a focused 0.5–1.5 Hz slider range; default volume 0.12 (still starts muted).
+- **Audio beat fixed (was fundamentally broken):** the old multiplicative transpose turned |f₁−f₂| into a huge interval (1 & 2 Hz → 260 & 520 Hz, an octave — no beat). Now a single carrier at the average pitch is amplitude-modulated by the *same* envelope the canvas draws, so the audible wah is phase-locked to the picture — loud when constructive, silent at nodes.
+- **Standing waves slowed** (fundamental sim frequency 0.28 → 0.10 Hz) so the velocity arrows and KE↔PE transfer stay watchable through the harmonics; energy bars publish at ~60/s (was ~10) so they animate smoothly; energy panel retitled "Energy (KE ↔ PE)".
+- Tone pass on both modes (InfoPanels + on-canvas/JSX text; em-dashes and shouting caps removed).
+
+**Verdict:** ✅ Solidified (beats + standing). **Chapter 16 complete.**
 
 ### D37 · Traveling Wave Explorer — L37 (transverse) · L38 (longitudinal) · ✅ solidified
 

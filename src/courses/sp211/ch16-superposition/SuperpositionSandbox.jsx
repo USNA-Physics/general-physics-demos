@@ -698,7 +698,7 @@ function StandingMode() {
         ctx.fillRect(x1, y0 - 14, 6, 28);
       }
 
-      if (readoutAccum > 0.1) {
+      if (readoutAccum > 0.016) {   // ~60/s so the KE↔PE energy bars stay smooth
         readoutAccum = 0;
         const en = energyNow(modes, nNow, tEff);
         const kf = en.total > 0 ? en.ke / en.total : 0;
@@ -900,7 +900,7 @@ function StandingMode() {
         {/* KE/PE breathing bars + (for a pluck) the live harmonic spectrum */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="bg-usna-card border border-usna-grid rounded-lg p-3 min-w-0">
-            <div className="text-usna-text text-sm font-medium mb-2">Energy (breathing)</div>
+            <div className="text-usna-text text-sm font-medium mb-2">Energy (KE ↔ PE)</div>
             <EnergyBars items={barItems} max={1} total={1} height={150} />
             <p className="text-usna-muted text-xs mt-2 leading-snug">
               KE and PE trade 90° out of phase; KE peaks exactly at the flat
