@@ -434,7 +434,9 @@ function BuoyancyMode() {
   // density RISES with depth. Above neutral this is a stabilizing nudge toward
   // the surface; below neutral it is destabilizing — the deeper it goes, the
   // heavier (relatively) it gets, and the harder it sinks: the runaway dive.
-  const COMPRESS_PER_M = 0.0015; // fractional volume loss per meter of depth
+  const COMPRESS_PER_M = 0.02; // fractional volume loss per meter of depth (scaled
+  // up from a real hull's tiny value so the mean-density climb is visible over the
+  // shallow demo tank and the below-neutral runaway dive actually shows)
   const effDensityAtDepth = (depthM) => {
     const base = baseDensity();
     if (!(subRef.current && compressRef.current)) return base;
@@ -459,6 +461,13 @@ function BuoyancyMode() {
     setSubMode(true);
     setFluidKey('sea');
     setBallast(0.35);
+  };
+
+  // Toggle submarine framing: a second click turns it back off (and clears the
+  // depth-compression option, which only exists in submarine mode).
+  const toggleSub = () => {
+    if (subMode) { setSubMode(false); setCompress(false); }
+    else enterSub();
   };
 
   // Reported depth of the object's centroid (published from the loop) so DOM
@@ -582,9 +591,13 @@ function BuoyancyMode() {
       // Analytic equilibrium fraction, for labeling the "should settle to" value.
       const eqFrac = clamp(rhoObj / rhoFl, 0, 1);
 
+      // buoyancy state by relative density: exactly neutral (hovers), nearly
+      // neutral (within a few percent), or clearly floats / sinks.
+      const rel = rhoObj / rhoFl - 1;
       let state;
-      if (rhoObj > rhoFl + 1) state = 'sinks';
-      else if (Math.abs(rhoObj - rhoFl) <= 1) state = 'neutral';
+      if (Math.abs(rel) < 0.004) state = 'neutral';
+      else if (Math.abs(rel) < 0.04) state = 'nearly neutral';
+      else if (rel > 0) state = 'sinks';
       else state = 'floats';
 
       const key = `${(subFracGeom * 100).toFixed(0)},${FB.toFixed(0)},${Wt.toFixed(0)},${state},${draggingRef.current ? 'd' : 'r'}`;
@@ -769,11 +782,26 @@ function BuoyancyMode() {
   };
 
   const fluid = FLUIDS[fluidKey];
-  const shownDensity = readouts.effRho || (subMode ? SUB_DRY + (SUB_FLOODED - SUB_DRY) * ballast : density);
+  const baseRho = subMode ? SUB_DRY + (SUB_FLOODED - SUB_DRY) * ballast : density;
+  const shownDensity = readouts.effRho || baseRho;
+  // hull volume relative to the surface (< 100% once depth-compressed)
+  const hullVol = readouts.effRho > 0 ? baseRho / readouts.effRho : 1;
   const stateColor =
     readouts.state === 'floats' ? 'text-usna-gold'
       : readouts.state === 'sinks' ? 'text-red-400'
-        : 'text-emerald-400';
+        : readouts.state === 'nearly neutral' ? 'text-teal-300'
+          : 'text-emerald-400';
+
+  // Snap exactly to neutral buoyancy (mean density = fluid density). For a plain
+  // object that means ρ_obj = ρ_fluid; for the submarine it is the ballast fill
+  // that makes the mean hull density equal the fluid.
+  const setNeutral = () => {
+    if (subMode) {
+      setBallast(clamp((fluid.rho - SUB_DRY) / (SUB_FLOODED - SUB_DRY), 0, 1));
+    } else {
+      setDensity(fluid.rho);
+    }
+  };
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
@@ -792,12 +820,12 @@ function BuoyancyMode() {
             ))}
           </div>
           <button
-            onClick={enterSub}
+            onClick={toggleSub}
             className={`mt-2 w-full px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
               subMode ? 'bg-usna-gold text-usna-navy border-usna-gold' : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
             }`}
           >
-            ⚓ Submarine mode
+            ⚓ Submarine mode{subMode ? ' (on)' : ''}
           </button>
           {subMode && (
             <button
@@ -835,6 +863,12 @@ function BuoyancyMode() {
         ) : (
           <Slider label="Object density (ρ_obj)" value={density} min={100} max={2000} step={10} unit="kg/m³" onChange={setDensity} />
         )}
+        <button
+          onClick={setNeutral}
+          className="mt-1 w-full px-3 py-1 rounded text-xs font-medium bg-usna-deep text-emerald-300 border border-usna-grid hover:border-emerald-400 hover:text-emerald-200 transition-colors"
+        >
+          ◎ Set neutral (mean ρ = fluid ρ)
+        </button>
 
         <div className="mt-2 border-t border-usna-grid pt-3">
           <div className="flex items-baseline justify-between mb-2">
@@ -843,6 +877,9 @@ function BuoyancyMode() {
           </div>
           <Readout label="Mean density" value={shownDensity.toFixed(0)} unit="kg/m³" />
           <Readout label="Fluid density" value={fluid.rho.toFixed(0)} unit="kg/m³" />
+          {subMode && compress && (
+            <Readout label="Hull volume (vs surface)" value={hullVol.toFixed(3) === '1.000' ? '100.0' : (hullVol * 100).toFixed(1)} unit="%" />
+          )}
           <Readout
             label={readouts.state === 'sinks' ? 'Submerged (fully)' : 'Equilibrium submerged'}
             value={`${(readouts.subFrac * 100).toFixed(0)}`}

@@ -32,7 +32,7 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L28 | D28 · Rolling Race | `ch09-rotation/rolling` | ✅ |
 | L29, L30 | D30 · Angular Momentum Conservation | `ch10-angular-momentum/conservation` · vector/skater | ✅ |
 | L31, L32 | D31 · Orbit Simulator | `ch11-gravity/orbits` · kepler/escape | ✅ |
-| L33, L34 | D34 · Buoyancy Tank | `ch13-fluids/tank` · pressure/buoyancy | ⬜ |
+| L33, L34 | D34 · Buoyancy Tank | `ch13-fluids/tank` · pressure/buoyancy | ✅ |
 | L35, L36 | D35 · SHM Explorer | `ch14-oscillations/shm` · spring/pendulum | ⬜ |
 | L37, L38 | D37 · Traveling Wave Explorer | `ch15-waves/traveling` · transverse/longitudinal | ⬜ |
 | L39 | D39 · Doppler Wavefront Visualizer | `ch15-waves/doppler` | ⬜ |
@@ -41,6 +41,21 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D34 · Buoyancy Tank — L33 (pressure) · L34 (buoyancy) · ✅ solidified
+
+**Route:** `/#/sp211/ch13-fluids/tank` (pressure / buoyancy, with a submarine sub-mode)
+
+**Goal:** P = P₀ + ρgh acts equally in all directions and its top-vs-bottom mismatch is buoyancy; a floating body settles to submerged fraction ρ_obj/ρ_fluid with F_B = ρ_fluid V g; ballast slides a submarine's mean density through neutral.
+
+**Changes this review (buoyancy mode):**
+- **Submarine button now toggles** off on a second click (it always re-entered before); shows "(on)" when active and clears depth-compression when turned off.
+- **Depth compression made visible:** the per-meter factor was too small to matter over the shallow tank (~0.4%); scaled it up so the mean density visibly climbs on descent (and the below-neutral runaway dive actually shows), plus a new "Hull volume (vs surface)" readout.
+- **Neutral is now a real, reachable state:** relative-density bands give neutral / nearly neutral / floats / sinks (emerald / teal / gold / red), and a "◎ Set neutral" button snaps the object density (or submarine ballast) exactly to the fluid density, so neutral is achievable even in seawater/mercury.
+
+**Note:** InfoPanel copy still carries some em-dashes / shouting caps (tone pass not yet done — see follow-up).
+
+**Verdict:** ✅ Solidified (pressure + buoyancy).
 
 ### D31 · Orbit Simulator — L31 (kepler) · L32 (escape) · ✅ solidified
 
