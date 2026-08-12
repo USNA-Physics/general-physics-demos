@@ -3,6 +3,7 @@ import ControlPanel from '@shared/components/ControlPanel';
 import Slider from '@shared/components/Slider';
 import Readout from '@shared/components/Readout';
 import InfoPanel from '@shared/components/InfoPanel';
+import IntensityPlot from '@shared/components/IntensityPlot';
 import { SHAPES, byKey, inertia, parallelAxis } from '@shared/lib/shapes';
 import { setupCanvas } from '@shared/lib/canvas';
 
@@ -1052,6 +1053,8 @@ function DynamicsMode() {
 
 // ── Στ = Iα playground: same torque, different shapes, different α ──
 const SPINNABLE = SHAPES.filter((s) => s.rolls); // hoop, cylinder, shell, sphere
+// Distinct line colors for the ω(t) comparison plot (one per spinnable body).
+const SPIN_COLORS = { hoop: RED, cylinder: BLUE, shell: GOLD, sphere: GREEN };
 
 function TorquePlayground() {
   const wrapRef = useRef(null);
@@ -1062,6 +1065,7 @@ function TorquePlayground() {
   const [radius, setRadius] = useState(0.4); // m
   const [selected, setSelected] = useState('cylinder');
   const [running, setRunning] = useState(false);
+  const [tNow, setTNow] = useState(0);       // elapsed run time (s), for the plot cursor
 
   const sel = byKey[selected];
   const I = inertia(sel.cInertia, mass, radius);
@@ -1073,6 +1077,7 @@ function TorquePlayground() {
 
   const omega = useRef(0);
   const angle = useRef(0);
+  const elapsed = useRef(0);       // real seconds since the torque was applied
   const live = useRef({ alpha, running });
   live.current = { alpha, running };
   const selRef = useRef(selected);
@@ -1082,17 +1087,19 @@ function TorquePlayground() {
 
   const reset = () => {
     setTorque(2); setMass(2); setRadius(0.4); setSelected('cylinder'); setRunning(false);
-    omega.current = 0; angle.current = 0; setCapped(false);
+    omega.current = 0; angle.current = 0; elapsed.current = 0; setTNow(0); setCapped(false);
   };
 
   // reset kinematics whenever the body/params change
-  useEffect(() => { omega.current = 0; angle.current = 0; setCapped(false); }, [selected, mass, radius, torque]);
+  useEffect(() => {
+    omega.current = 0; angle.current = 0; elapsed.current = 0; setTNow(0); setCapped(false);
+  }, [selected, mass, radius, torque]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    let ctx, W, H, raf, last;
+    let ctx, W, H, raf, last, lastPush = 0;
 
     const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
 
@@ -1103,9 +1110,13 @@ function TorquePlayground() {
       if (run) {
         omega.current += a * dt;
         angle.current += omega.current * dt;
+        elapsed.current += dt;
+        // push the elapsed time to the plot cursor at ~20 fps (Plotly-friendly)
+        if (now - lastPush > 50) { lastPush = now; setTNow(elapsed.current); }
         // auto-stop at the ceiling so ω never runs off the readout
         if (Math.abs(omega.current) >= OMEGA_MAX) {
           omega.current = Math.sign(omega.current) * OMEGA_MAX;
+          setTNow(elapsed.current);
           stopRef.current();
         }
       }
@@ -1149,6 +1160,50 @@ function TorquePlayground() {
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
+  // ── ω(t) comparison across all four bodies. α = τ/I is constant, so each is a
+  // straight line rising until it hits the OMEGA_MAX ceiling. All are drawn light;
+  // the selected body is bold and on top, with a live cursor tracking the run. ──
+  const spinAlphas = SPINNABLE.map((s) => ({
+    key: s.key, label: s.label, a: torque / inertia(s.cInertia, mass, radius),
+  }));
+  const aMinSpin = Math.min(...spinAlphas.map((o) => o.a));
+  const tPlotMax = aMinSpin > 0 ? OMEGA_MAX / aMinSpin : 5; // slowest body caps here
+  const omegaTraces = spinAlphas
+    .slice()
+    // selected drawn last so its bold line sits on top of the light ones
+    .sort((p, q) => (p.key === selected ? 1 : 0) - (q.key === selected ? 1 : 0))
+    .map(({ key, label, a }) => {
+      const tCap = Math.min(tPlotMax, a > 0 ? OMEGA_MAX / a : tPlotMax);
+      const xs = [0, tCap];
+      const ys = [0, Math.min(OMEGA_MAX, a * tCap)];
+      if (tCap < tPlotMax) { xs.push(tPlotMax); ys.push(OMEGA_MAX); } // flat at the ceiling
+      const isSel = key === selected;
+      const col = SPIN_COLORS[key] || BLUE;
+      return {
+        x: xs, y: ys, type: 'scatter', mode: 'lines', name: label,
+        line: { color: isSel ? col : hexA(col, 0.3), width: isSel ? 3.6 : 1.8 },
+        hoverinfo: 'skip',
+      };
+    });
+  if (tNow > 0) {
+    const tc = Math.min(tNow, tPlotMax);
+    omegaTraces.push({
+      x: [tc], y: [Math.min(OMEGA_MAX, alpha * tc)],
+      type: 'scatter', mode: 'markers', showlegend: false, hoverinfo: 'skip',
+      marker: { color: '#FFFFFF', size: 9, line: { color: SPIN_COLORS[selected] || GOLD, width: 2 } },
+    });
+  }
+  const omegaLayout = {
+    showlegend: true,
+    legend: { orientation: 'h', y: -0.46, x: 0.5, xanchor: 'center', yanchor: 'top', font: { size: 11 } },
+    margin: { l: 54, r: 16, t: 14, b: 82 },
+    xaxis: { title: { text: 'Time (s)' }, range: [0, tPlotMax], zeroline: false },
+    yaxis: {
+      title: { text: 'ω (rad/s)' }, range: [0, OMEGA_MAX * 1.05], autorange: false,
+      zeroline: true, zerolinecolor: '#2A3442',
+    },
+  };
+
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <ControlPanel onReset={reset}>
@@ -1177,7 +1232,7 @@ function TorquePlayground() {
 
         <button
           onClick={() => {
-            if (capped) { omega.current = 0; angle.current = 0; setCapped(false); setRunning(true); return; }
+            if (capped) { omega.current = 0; angle.current = 0; elapsed.current = 0; setTNow(0); setCapped(false); setRunning(true); return; }
             setRunning((r) => !r);
           }}
           className="w-full py-2 rounded text-sm font-semibold bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors"
@@ -1201,6 +1256,21 @@ function TorquePlayground() {
              style={{ height: 420, background: DEEP }}>
           <canvas ref={canvasRef} className="block" />
         </div>
+
+        <div className="bg-usna-card border border-usna-grid rounded-lg p-4">
+          <div className="text-usna-text text-sm font-medium mb-2">
+            ω vs time (same τ applied to all four bodies)
+          </div>
+          <div className="min-w-0 overflow-hidden" style={{ height: 240 }}>
+            <IntensityPlot traces={omegaTraces} layoutOverrides={omegaLayout} />
+          </div>
+          <p className="text-usna-muted text-xs mt-2">
+            Every line has slope α = τ / I, so the smallest-I body (solid sphere) climbs
+            steepest and the hoop is shallowest. The bold line is the selected body; the dot
+            tracks its spin-up as you apply the torque.
+          </p>
+        </div>
+
         <InfoPanel {...INFO.dynamics} />
       </div>
     </div>

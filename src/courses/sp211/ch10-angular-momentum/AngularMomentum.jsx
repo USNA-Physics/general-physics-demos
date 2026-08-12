@@ -463,7 +463,7 @@ function VectorMode() {
           <p className="text-usna-muted text-xs mt-2 leading-snug">
             {gravity
               ? 'Gravity exerts a torque about O, so dL/dt = τ = r × F is nonzero and L changes as the particle arcs. Drag O onto the line straight below the peak and τ momentarily vanishes.'
-              : 'Drag pivot O ALONG the line of motion: b is unchanged, so L holds. Drag it PERPENDICULAR: b (and L) scale. |r| and φ change every frame, but r·sin φ stays pinned at b.'}
+              : 'Drag pivot O along the line of motion: b is unchanged, so L holds. Drag it perpendicular to that line and b (and L) scale. |r| and φ change every frame, but r·sin φ stays pinned at b.'}
           </p>
         </div>
       </ControlPanel>
@@ -481,9 +481,9 @@ function VectorMode() {
 }
 
 const V_INFO = {
-  title: 'Straight-line motion has angular momentum — until a torque acts',
+  title: 'Straight-line motion still has angular momentum',
   description:
-    'A particle moving in a perfectly straight line — no rotation anywhere — still carries angular momentum about any point off its path. As it glides past the pivot, |r| and the angle φ change dramatically, yet L = r·p·sin φ = p·b holds flat because the perpendicular lever arm b never changes. Drag the pivot O to feel that L is set by the axis you choose: slide O along the line of motion and L is unchanged; move it perpendicular and L scales with b. Turn on gravity and there is finally a torque about O — the path curves and L is no longer conserved, with dL/dt equal to the instantaneous torque τ = r × F. No torque ⟹ constant angular momentum.',
+    'A particle moving in a straight line, with no rotation anywhere, still carries angular momentum about any point off its path. As it glides past the pivot, |r| and the angle φ change a great deal, yet L = r·p·sin φ = p·b stays flat because the perpendicular lever arm b never changes. Drag the pivot O to see that L depends on the axis you choose: slide O along the line of motion and L is unchanged; move it perpendicular and L scales with b. Turn on gravity and there is a torque about O, so the path curves and L is no longer conserved, with dL/dt equal to the instantaneous torque τ = r × F. No torque means constant angular momentum.',
   equation: String.raw`\vec{L} = \vec{r} \times \vec{p}, \quad L = p\,b = mvb, \qquad \frac{d\vec L}{dt} = \vec\tau = \vec r \times \vec F`,
 };
 
@@ -549,11 +549,22 @@ const SCENARIOS = {
     inLabel: '≈20 km', outLabel: '≈7×10⁵ km',
     accent: BLUE,
     realScale: true,
+    // The radius spans 20 km → 7×10⁵ km, a factor of 35,000. A linear slider would
+    // keep r near the top for almost its whole travel (ω ∝ 1/r² stays ~0) and then
+    // spike only in the last sliver. Map the radius logarithmically instead, so
+    // each slider step multiplies r (and ω) by a constant factor and the spin-up
+    // reads as a smooth ramp across the slider.
+    logRadius: true,
   },
 };
 
-// r(a) in the scenario's radius units (m for skater/mgr, km for star).
-function radiusOf(sc, a) { return sc.rMin + a * (sc.rMax - sc.rMin); }
+// r(a) in the scenario's radius units (m for skater/mgr, km for star). Scenarios
+// with a huge radius ratio (the neutron star) map logarithmically so equal slider
+// steps scale the radius by a constant factor; the rest stay linear.
+function radiusOf(sc, a) {
+  if (sc.logRadius) return sc.rMin * Math.pow(sc.rMax / sc.rMin, a);
+  return sc.rMin + a * (sc.rMax - sc.rMin);
+}
 // I as a function of arm fraction a for a scenario.
 function inertiaOf(sc, a) {
   const r = radiusOf(sc, a);
@@ -628,16 +639,22 @@ function SkaterMode() {
       const a = armRef.current;
       const om = omegaRef.current;            // TRUE angular rate (rad/s)
 
-      // FIX: visual spin is driven from the TRUE omega for EVERY scenario.
-      // trueRev is the honest rev/s; we cap the on-screen rate at VIS_CAP so
-      // the fast regimes don't strobe, and flag when we've capped.
       const trueRev = om / (2 * Math.PI);
-      const visRev = Math.min(VIS_CAP, trueRev);
+      const heat = 1 - a;   // 0 extended → 1 fully collapsed (glow/trails + spin scale)
+
+      // Visual spin. The skater and merry-go-round run at a few rev/s, so their
+      // on-screen spin is the literal rate (capped at VIS_CAP against strobing).
+      // The neutron star's true rate spans ~9 orders of magnitude, so a literal
+      // mapping sits still and then blurs. Drive its spin on a compressed scale
+      // (∝ how many orders of magnitude it has spun up, which is linear in the
+      // slider here) so the collapse reads as a smooth ramp; the readout and the
+      // on-canvas note still report the true rate.
+      const visRev = s.realScale
+        ? VIS_CAP * heat
+        : Math.min(VIS_CAP, trueRev);
       const capped = trueRev > VIS_CAP + 1e-6;
       phaseRef.current += visRev * 2 * Math.PI * dt;
       const phase = phaseRef.current;
-
-      const heat = 1 - a;   // 0 extended → 1 fully in (glow/trails)
 
       ctx.clearRect(0, 0, W, H);
       const cx = W / 2, cy = H * 0.50;
@@ -664,13 +681,20 @@ function SkaterMode() {
         drawSkater(ctx, cx, cy, R, a, phase, heat, s.accent);
       }
 
-      // "Spin not to scale" note whenever the true rate exceeds the cap.
-      if (capped) {
+      // Note the scale caveat: the star runs on a compressed spin scale, and the
+      // other scenarios flag when the literal rate is capped against strobing.
+      if (s.realScale || capped) {
         ctx.fillStyle = MUTED;
         ctx.font = '11px JetBrains Mono, monospace';
         ctx.textAlign = 'left';
-        ctx.fillText(`spin not to scale above ${VIS_CAP.toFixed(1)} rev/s`, 10, 18);
-        ctx.fillText(`(true ω ≈ ${trueRev >= 100 ? trueRev.toFixed(0) : trueRev.toFixed(1)} rev/s)`, 10, 33);
+        const trueTxt = trueRev >= 100 ? trueRev.toFixed(0) : trueRev >= 1 ? trueRev.toFixed(1) : trueRev.toExponential(1);
+        if (s.realScale) {
+          ctx.fillText('spin shown on a compressed scale', 10, 18);
+          ctx.fillText(`true rate ≈ ${trueTxt} rev/s`, 10, 33);
+        } else {
+          ctx.fillText(`spin not to scale above ${VIS_CAP.toFixed(1)} rev/s`, 10, 18);
+          ctx.fillText(`(true ω ≈ ${trueTxt} rev/s)`, 10, 33);
+        }
       }
 
       raf = requestAnimationFrame(draw);
@@ -743,7 +767,7 @@ function SkaterMode() {
         {sc.realScale && (
           <div className="text-usna-muted text-[11px] mb-2">
             radius R = <span className="font-mono text-usna-gold">{radiusDisp}</span> {radiusUnit}
-            {radiusOf(sc, armA) <= 30 && <span className="text-usna-gold"> — neutron-star scale</span>}
+            {radiusOf(sc, armA) <= 30 && <span className="text-usna-gold"> · neutron-star scale</span>}
           </div>
         )}
 
@@ -759,13 +783,13 @@ function SkaterMode() {
           )}
           <div className="mt-2 pt-2 border-t border-usna-grid">
             <Readout label="Angular momentum L" value={Ldisp} unit={Lunit} />
-            <span className="block text-right text-[11px] text-usna-muted -mt-1">↑ does NOT change</span>
+            <span className="block text-right text-[11px] text-usna-muted -mt-1">↑ does not change</span>
           </div>
           <div className="mt-2 pt-2 border-t border-usna-grid">
             <Readout label="Rotational KE" value={sc.revUnit ? KE.toExponential(2) : KE.toFixed(2)} unit="J*" />
             <Readout label="KE vs extended" value={`×${keRatio.toFixed(2)}`} unit="" />
             <span className="block text-right text-[11px]" style={{ color: keRatio > 1.001 ? GOLD : MUTED }}>
-              {keRatio > 1.001 ? '↑ RISES' : 'baseline'}
+              {keRatio > 1.001 ? '↑ rises' : 'baseline'}
             </span>
           </div>
         </div>
@@ -780,8 +804,8 @@ function SkaterMode() {
           {showAnswer && (
             <p className="text-usna-text text-xs mt-2 leading-snug bg-usna-deep border border-usna-grid rounded p-2">
               {sc.key === 'neutronstar'
-                ? 'Gravity does the work. As the core collapses, gravity pulls mass inward against its own centripetal demand, and that work becomes the extra rotational KE — the star spins itself up for free (energetically, it comes from gravitational PE).'
-                : 'Muscles (or the motor) do work. Pulling the mass inward requires force against the centripetal direction over a distance — that is work, W = ΔKE. Angular momentum is conserved because that force is radial and exerts no torque, but it still adds energy. KE = L²/2I, so shrinking I with L fixed must raise KE.'}
+                ? 'Gravity does the work. As the core collapses, gravity pulls the mass inward against its own centripetal demand, and that work becomes the extra rotational KE; the star spins up at the expense of gravitational potential energy.'
+                : 'Muscles (or the motor) do the work. Pulling the mass inward takes force against the centripetal direction over a distance, which is work, W = ΔKE. Angular momentum is conserved because that force is radial and exerts no torque, but it still adds energy. Since KE = L²/2I, shrinking I with L fixed must raise KE.'}
             </p>
           )}
         </div>
@@ -799,8 +823,8 @@ function SkaterMode() {
           <StackedEnergyAudit keBefore={keBeforeN} work={workN} keAfter={keAfterN} max={barMax} />
           <div className="text-usna-muted text-xs mt-3 leading-snug">
             KE<sub>after</sub> = KE<sub>before</sub> + W<sub>in</sub>. The middle bar stacks the
-            starting KE (dim) plus the work you did pulling the mass in (bright) — it exactly
-            reaches KE<sub>after</sub>. Angular momentum L is unchanged the whole time; the extra
+            starting KE (dim) plus the work you did pulling the mass in (bright), and it exactly
+            reaches KE<sub>after</sub>. Angular momentum L is unchanged throughout; the extra
             energy came from work, not from L.
           </div>
         </div>
@@ -857,9 +881,9 @@ function Column({ label, value, unit, valueColor, children }) {
 }
 
 const S_INFO = {
-  title: 'Same L, more energy — the question everyone misses',
+  title: 'Same L, but more energy',
   description:
-    'Pull the arms in and the moment of inertia I drops. Angular momentum L = Iω is conserved (no external torque), so ω rises to compensate — the L readout does not budge. But rotational KE = ½Iω² = L²/2I is inversely proportional to I, so it RISES. The exam trap: "if L is conserved, isn\'t energy conserved too?" No. The skater\'s muscles do work pulling mass inward, and that work is exactly the KE increase (KE_before + W_in = KE_after). Conserving angular momentum does not conserve kinetic energy. Push it to the extreme with the Crab-pulsar preset: a Sun-scale core turning once every ~25 days collapses to ~20 km and, with L fixed, spins up to hundreds of rev/s.',
+    'Pull the arms in and the moment of inertia I drops. Angular momentum L = Iω is conserved (there is no external torque), so ω rises to compensate and the L readout does not change. Rotational KE = ½Iω² = L²/2I is inversely proportional to I, so it rises. A common exam question asks whether conserved L means energy is conserved too; it does not. The skater\'s muscles do work pulling the mass inward, and that work is exactly the increase in KE (KE_before + W_in = KE_after). Conserving angular momentum does not conserve kinetic energy. The Crab-pulsar preset pushes this to the extreme: a Sun-scale core turning once every ~25 days collapses to about 20 km and, with L fixed, spins up to hundreds of rev/s.',
   equation: String.raw`L = I\omega = \text{const} \;\Rightarrow\; \omega = \frac{L}{I}, \quad KE = \frac{L^2}{2I}\uparrow, \quad KE_{\text{after}} = KE_{\text{before}} + W_{\text{in}}`,
 };
 
@@ -916,7 +940,7 @@ function drawSkater(ctx, cx, cy, R, a, phase, heat, accent) {
   ctx.fillStyle = MUTED;
   ctx.font = '12px JetBrains Mono, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(heat > 0.7 ? 'arms in — fast' : heat < 0.2 ? 'arms out — slow' : 'pulling in…', cx, cy + R + 24);
+  ctx.fillText(heat > 0.7 ? 'arms in · fast' : heat < 0.2 ? 'arms out · slow' : 'pulling in…', cx, cy + R + 24);
 }
 
 // Merry-go-round: a platform disk with a person dot at radius rNow, walking in.
@@ -972,7 +996,7 @@ function drawMerryGoRound(ctx, cx, cy, R, rNow, phase, heat, accent) {
   ctx.fillStyle = MUTED;
   ctx.font = '12px JetBrains Mono, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(heat > 0.7 ? 'at the center — fast' : heat < 0.2 ? 'at the rim — slow' : 'walking inward…', cx, cy + R + 24);
+  ctx.fillText(heat > 0.7 ? 'at the center · fast' : heat < 0.2 ? 'at the rim · slow' : 'walking inward…', cx, cy + R + 24);
 }
 
 // Neutron star: shrinking glowing sphere with orbiting hotspots + trails.

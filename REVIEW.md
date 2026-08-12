@@ -27,10 +27,10 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L15–L17 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ✅ |
 | L18–L20 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ✅ |
 | L21–L23 | D22 · Collision Sandbox | `ch08-momentum/collisions` · 1d/impulse/2d | ✅ |
-| L24 | D24 · Rotational Kinematics Grapher | `ch09-rotation/grapher` | ⬜ |
-| L25–L27 | D25 · Moment of Inertia Explorer | `ch09-rotation/inertia` · shapes/torque/dynamics | ⬜ |
-| L28 | D28 · Rolling Race | `ch09-rotation/rolling` | ⬜ |
-| L29, L30 | D30 · Angular Momentum Conservation | `ch10-angular-momentum/conservation` · vector/skater | ⬜ |
+| L24 | D24 · Rotational Kinematics Grapher | `ch09-rotation/grapher` | ✅ |
+| L25–L27 | D25 · Moment of Inertia Explorer | `ch09-rotation/inertia` · shapes/torque/dynamics | ✅ |
+| L28 | D28 · Rolling Race | `ch09-rotation/rolling` | ✅ |
+| L29, L30 | D30 · Angular Momentum Conservation | `ch10-angular-momentum/conservation` · vector/skater | ✅ |
 | L31, L32 | D31 · Orbit Simulator | `ch11-gravity/orbits` · kepler/escape | ⬜ |
 | L33, L34 | D34 · Buoyancy Tank | `ch13-fluids/tank` · pressure/buoyancy | ⬜ |
 | L35, L36 | D35 · SHM Explorer | `ch14-oscillations/shm` · spring/pendulum | ⬜ |
@@ -41,6 +41,40 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D28 · Rolling Race — L28 · ✅ solidified
+
+**Route:** `/#/sp211/ch09-rotation/rolling`
+
+**Goal:** rolling without slipping splits KE into translation + rotation; a = g sinθ / (1 + c), so ordering depends only on the shape constant c (mass and radius cancel): solid sphere wins, hoop loses.
+
+**Verdict:** ✅ Solidified. Reviewed and signed off previously (no changes this session). **Chapter 9 complete** (D24 grapher, D25 moment of inertia, D28 rolling race).
+
+### D25 · Moment of Inertia Explorer — L25 (shapes) · L26 (torque) · L27 (dynamics) · ✅ solidified
+
+**Route:** `/#/sp211/ch09-rotation/inertia` (shapes / torque / dynamics)
+
+**Goal:** I = c·m·r² depends on where the mass sits, not just how much; parallel axis adds M d²; τ = r F sinθ needs the perpendicular lever arm / perpendicular force; Στ = Iα is the rotational F = ma; a massive Atwood pulley drags a below g(m₁−m₂)/(m₁+m₂).
+
+**Changes this review:**
+- **Moment-of-inertia equations in the gallery grid:** each body now shows its symbolic I (hoop `I = mr²`, disk `I = (1/2)mr²`, shell `I = (2/3)mr²`, sphere `I = (2/5)mr²`, rods `I = (1/12)mL²` and `I = (1/3)mL²`) both under the canvas body and in the selector buttons. Used inline parenthesized fractions (not tiny unicode glyphs) at the same text size; taller gallery box (360→430) and eased body radius so no cell text clips.
+- **Torque arm clarified:** added a gold "twist τ" gauge arc around the bolt plus an on-canvas caption and panel note explaining that the tight bolt does not turn, the handle flexes by the applied torque, and it returns to level as the torque eases.
+- **Στ = Iα playground: new ω-vs-time comparison plot.** All four spinnable bodies drawn as straight ω(t) = (τ/I)t lines (flattening at the 30 rad/s cap), the three non-selected ones light, the selected one bold and on top, with a live white cursor tracking the selected body's spin-up. Legend placed below the axis.
+- InfoPanels + on-canvas/JSX text de-AI'd across all modes (no em-dashes, no shouting caps).
+
+**Verdict:** ✅ Solidified (shapes / torque / dynamics, plus the builder and Atwood sub-tools).
+
+### D24 · Rotational Kinematics Grapher — L24 · ✅ solidified
+
+**Route:** `/#/sp211/ch09-rotation/grapher`
+
+**Goal:** the angular twin of D01 — three time-synced panels θ/ω/α built by integrating α (so ω = ∫α, θ = ∫ω hold exactly); a spinning disk shows one ω giving every point its own v = r·ω; D01 ghost overlay, area/slope grammar, and a "flick the disk" recorder.
+
+**Changes this review:**
+- **Frame rate:** replaced the 15 fps `setInterval` play loop with a continuous rAF clock; the disk now samples the motion at a smoothly advancing time (60 fps) via a new interpolator, while the React scrub (Plotly cursor) updates at ~30 fps. Fixed a stale-closure bug where the rim velocity arrow read the initial radius.
+- **Text de-AI'd:** InfoPanel title/description and the "One ω, two speeds" note (no em-dashes, no AI flourishes).
+
+**Verdict:** ✅ Solidified.
 
 ### D22 · Collision Sandbox — L21 (1d) · L22 (impulse) · L23 (2d) · ✅ solidified
 
