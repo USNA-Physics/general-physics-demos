@@ -24,8 +24,8 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L12 | D12 · Drag & Terminal Velocity | `ch05-applications/drag` (moved out of Ch2) | ✅ |
 | L13 | D13 · Banked Curve | `ch05-applications/banked` (moved out of UCM/D07) | ✅ |
 | L14 | D14 · Center of Mass Playground | `ch05-applications/cm` · default/tumbling | ✅ |
-| L15–L17 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ⬜ |
-| L18–L20 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ⬜ |
+| L15–L17 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ✅ |
+| L18–L20 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ✅ |
 | L21–L23 | D22 · Collision Sandbox | `ch08-momentum/collisions` · 1d/impulse/2d | ⬜ |
 | L24 | D24 · Rotational Kinematics Grapher | `ch09-rotation/grapher` | ⬜ |
 | L25–L27 | D25 · Moment of Inertia Explorer | `ch09-rotation/inertia` · shapes/torque/dynamics | ⬜ |
@@ -41,6 +41,32 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D18 · Energy Landscape Explorer — L18 · L19 · L20 · ✅ solidified
+
+**Route:** `/#/sp211/ch07-energy/landscape` (default / equilibria / dissipation)
+
+**Goal:** ball on U(x) with F = −dU/dx; K↔U trade while total E stays flat; turning points at E = U(x); stable/unstable equilibria; friction bleeds mechanical energy into a thermal bar (K+U+thermal conserved).
+
+**Changes this review:**
+- **Equilibria:** deduped `findExtrema` (adjacent samples double-flagged a smooth min/max → doubled ○/△ labels; now merged to the true extreme).
+- **Mode-switch state carryover fixed:** the component is reused across modes, so dissipation's friction (and accumulated thermal) bled into equilibria. A mode-change effect now resets friction to the mode default and re-drops the ball.
+
+**Verdict:** ✅ Solidified. Dissipation mode praised as-is.
+
+### D15 · Work & Power Visualizer — L15 (dot) · L16 (area) · L17 (power) · ✅ solidified
+
+**Route:** `/#/sp211/ch06-work/work`
+
+**Changes this review:**
+- **Dot mode rewritten to real physics on rAF** (was a fixed setInterval): the rope's F∥ accelerates the crate at a = F∥/m. Rest-start when pulled forward (so mass is plainly visible), moving-entry for the zero/negative-work cases. Added a crate-mass slider, crate-speed and kinetic-energy readouts, and the W = ΔKE framing.
+- **Defaults tuned:** force 80 → 10 N (range 0–50), distance 4 → 7 m; force arrows rescaled (3 → 12 px/N) with a proportional cap.
+- **Force labels (F, F∥, F⊥) placed by hand** at distinct anchors (they shared a tip and collided), hidden when ~0.
+- **Area mode:** energy-driven motion (v = √(2·KE/m), KE = launch + work-so-far) + a **position-vs-time panel** drawn as a dashed ghost the crate rides (matching the W(s) style).
+- **Power mode:** race slowed (track 8→18 m) so the lower-force motor still wins but watchably, and its "tie" messaging corrected; curved ramp fixed (it was pinned by a flat, zero-force bottom → reshaped to a 12°→40° incline, VMAX cap, 400 W default) so v = P/F∥ visibly surges/crawls; race force labels moved off the arrowheads; "handicap" renamed to "uneven power".
+- All InfoPanels de-AI'd.
+
+**Verdict:** ✅ Solidified (all three modes).
 
 ### D14 · Center of Mass Playground — L14 · ✅ solidified
 

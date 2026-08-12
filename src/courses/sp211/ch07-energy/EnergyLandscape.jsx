@@ -130,11 +130,23 @@ function curvatureAt(tbl, x) {
 function findExtrema(tbl) {
   const { xs, us } = tbl;
   const minima = [], maxima = [];
+  // A smooth extremum can trip the ±2-sample slope test on a couple of adjacent
+  // samples, so merge candidates that fall within MERGE samples of each other and
+  // keep the true extreme (deepest min / highest max). Otherwise the same
+  // minimum/maximum would be marked (and labelled) twice.
+  const MERGE = 6;
   for (let i = 2; i < NS - 2; i++) {
     const dL = us[i] - us[i - 2];
     const dR = us[i + 2] - us[i];
-    if (dL < 0 && dR > 0) minima.push({ x: xs[i], u: us[i], i });
-    else if (dL > 0 && dR < 0) maxima.push({ x: xs[i], u: us[i], i });
+    if (dL < 0 && dR > 0) {
+      const last = minima[minima.length - 1];
+      if (last && i - last.i <= MERGE) { if (us[i] < last.u) minima[minima.length - 1] = { x: xs[i], u: us[i], i }; }
+      else minima.push({ x: xs[i], u: us[i], i });
+    } else if (dL > 0 && dR < 0) {
+      const last = maxima[maxima.length - 1];
+      if (last && i - last.i <= MERGE) { if (us[i] > last.u) maxima[maxima.length - 1] = { x: xs[i], u: us[i], i }; }
+      else maxima.push({ x: xs[i], u: us[i], i });
+    }
   }
   return { minima, maxima };
 }
@@ -237,6 +249,16 @@ function LandscapeSim({ mode }) {
     tblRef.current = sampleU(PRESETS[isEquil ? 'well' : 'bowl'].U);
     seedBall();
   };
+
+  // The component is reused across modes (not remounted), so friction and the
+  // accumulated thermal energy would otherwise carry over — e.g. dissipation's
+  // friction kept bleeding energy after switching back to equilibria. Reset the
+  // friction to the mode's default and re-drop the ball on every mode change.
+  useEffect(() => {
+    setFriction(mode === 'dissipation' ? 0.4 : 0);
+    seedBall();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // ── canvas + physics loop ─────────────────────────────────────────────────
   useEffect(() => {

@@ -317,14 +317,16 @@ function OneDMode() {
         ctx.fillText('center of mass · Σp = 0', W * 0.5, trackY - CART_H - 4);
       }
 
-      // motion trails
+      // motion trails — a faint, slim central streak so the boxes' edges stay clear
       if (p.trails) {
+        const th = CART_H * 0.42;
+        const ty = trackY - th / 2;
         for (let i = 0; i < trailA.length; i++) {
-          const a = (i / trailA.length) * 0.35;
+          const a = (i / trailA.length) * 0.14;
           ctx.fillStyle = `rgba(197,183,131,${a.toFixed(3)})`;
-          ctx.fillRect(SX(trailA[i]) - wA / 2, trackY - CART_H / 2, wA, CART_H);
+          ctx.fillRect(SX(trailA[i]) - wA / 2, ty, wA, th);
           ctx.fillStyle = `rgba(62,92,138,${a.toFixed(3)})`;
-          ctx.fillRect(SX(trailB[i]) - wB / 2, trackY - CART_H / 2, wB, CART_H);
+          ctx.fillRect(SX(trailB[i]) - wB / 2, ty, wB, th);
         }
       }
 
@@ -341,12 +343,14 @@ function OneDMode() {
         ctx.fill();
       }
 
-      // carts
+      // carts (solid fill + a crisp outline so the box edges read over the trail)
       const yTop = trackY - CART_H / 2;
       roundRect(ctx, SX(xA) - wA / 2, yTop, wA, CART_H, 8);
       ctx.fillStyle = GOLD; ctx.fill();
+      ctx.strokeStyle = 'rgba(13,19,33,0.85)'; ctx.lineWidth = 2; ctx.stroke();
       roundRect(ctx, SX(xB) - wB / 2, yTop, wB, CART_H, 8);
       ctx.fillStyle = NAVY_CART; ctx.fill();
+      ctx.strokeStyle = 'rgba(240,236,227,0.55)'; ctx.lineWidth = 2; ctx.stroke();
 
       // velocity arrows (screen +x = physics +x here) drawn in the chosen frame
       drawArrow(ctx, { x: SX(xA), y: trackY, dx: clampArrow(dispA * ppm * 0.22), dy: 0, color: DEEP, width: 2.6, head: 8 });
@@ -992,12 +996,12 @@ function TwoDMode() {
       for (let gx = 0; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
       for (let gy = 0; gy < H; gy += 40) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
 
-      // trails
+      // trails — faint, slim dots so the balls' edges stay clear
       const drawTrail = (tr, rgb) => {
         for (let i = 0; i < tr.length; i++) {
-          const a = (i / tr.length) * 0.4;
+          const a = (i / tr.length) * 0.16;
           ctx.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
-          ctx.beginPath(); ctx.arc(tr[i][0], tr[i][1], R * 0.5, 0, 2 * Math.PI); ctx.fill();
+          ctx.beginPath(); ctx.arc(tr[i][0], tr[i][1], R * 0.32, 0, 2 * Math.PI); ctx.fill();
         }
       };
       drawTrail(trail1, '197,183,131');

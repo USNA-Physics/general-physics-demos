@@ -239,25 +239,33 @@ function DotMode() {
       ctx.setLineDash([]);
 
       const fParVal = F * Math.cos(th);               // signed working component
+      const fPerpVal = F * Math.sin(th);              // perpendicular component
       const backward = fParVal < -0.5;                // F∥ opposes the motion
-      // working (horizontal) component — GREEN when it drives, RED when it brakes
-      drawArrow(ctx, {
-        x: anchorX, y: anchorY, dx: dxF, dy: 0,
-        color: backward ? RED : GREEN, width: 4,
-        label: `F∥ = ${fParVal.toFixed(0)} N${backward ? ' (opposes)' : ''}`,
-      });
-      // perpendicular / vertical component — always no-work, drawn amber-muted
-      drawArrow(ctx, {
-        x: anchorX + dxF, y: anchorY, dx: 0, dy: dyF,
-        color: 'rgba(217,128,91,0.75)', width: 3,
-        label: `F⊥ = ${(F * Math.sin(th)).toFixed(0)} N`,
-      });
-      // total applied force — GOLD (drawn last, on top)
-      drawArrow(ctx, {
-        x: anchorX, y: anchorY, dx: dxF, dy: dyF,
-        color: GOLD, width: 3,
-        label: `F = ${F.toFixed(0)} N`,
-      });
+      // arrows first, WITHOUT labels (the F⊥ and total-F arrows share a tip, so
+      // their built-in labels would collide there — we place all three by hand).
+      drawArrow(ctx, { x: anchorX, y: anchorY, dx: dxF, dy: 0, color: backward ? RED : GREEN, width: 4 });
+      drawArrow(ctx, { x: anchorX + dxF, y: anchorY, dx: 0, dy: dyF, color: 'rgba(217,128,91,0.85)', width: 3 });
+      drawArrow(ctx, { x: anchorX, y: anchorY, dx: dxF, dy: dyF, color: GOLD, width: 3 });
+
+      // labels at distinct spots; a component's label is hidden when it is ~0
+      ctx.font = 'bold 12px JetBrains Mono, monospace';
+      ctx.textBaseline = 'middle';
+      if (Math.abs(fParVal) > 0.5) {                  // F∥ beyond the horizontal tip
+        ctx.fillStyle = backward ? RED : GREEN;
+        ctx.textAlign = dxF >= 0 ? 'left' : 'right';
+        ctx.fillText(`F∥ = ${fParVal.toFixed(0)} N`, anchorX + dxF + (dxF >= 0 ? 8 : -8), anchorY);
+      }
+      if (Math.abs(fPerpVal) > 0.5) {                 // F⊥ beside the vertical leg's middle
+        ctx.fillStyle = 'rgba(217,128,91,0.95)';
+        ctx.textAlign = 'left';
+        ctx.fillText(`F⊥ = ${fPerpVal.toFixed(0)} N`, anchorX + dxF + 8, anchorY + dyF / 2);
+      }
+      // total F: above the resultant tip (lifted clear of the F∥ row)
+      const rlen = Math.hypot(dxF, dyF) || 1;
+      const ux = dxF / rlen, uy = dyF / rlen;
+      ctx.fillStyle = GOLD;
+      ctx.textAlign = ux >= 0 ? 'left' : 'right';
+      ctx.fillText(`F = ${F.toFixed(0)} N`, anchorX + dxF + ux * 10, anchorY + dyF + uy * 12 - 14);
 
       // angle arc (sweeps from +x to the rope direction)
       ctx.strokeStyle = GOLD;
@@ -361,7 +369,7 @@ function DotMode() {
             <Readout label="Total work (over d)" value={workTotal.toFixed(1)} unit="J" />
             <Readout label="Kinetic energy" value={ke.toFixed(1)} unit="J" />
             <div className="text-usna-muted text-[11px] mt-1 leading-snug">
-              Frictionless, so the rope is the only working force and the work it does equals the change in kinetic energy (W = ΔKE). A heavier crate gains less speed from the same work.
+              The work W = F d cosθ depends only on the force, distance, and angle, not on the mass. The mass instead sets the speed: the same work gives a heavier crate less speed (½mv² = W), so it also takes longer to cross.
             </div>
           </div>
           {near90 && (
@@ -395,12 +403,15 @@ function DotMode() {
 const AX_MAX = 6;          // m, x-axis extent for the one-way curves
 const AN = 160;            // samples across the curve
 const CUSTOM_PTS = 7;      // control points for the custom curve
+const A_MASS = 10;         // kg, crate mass (sets the timing of the sweep)
+const A_KE0 = 20;          // J, launch kinetic energy (so the crate is moving at x=0)
+const A_TS = 0.35;         // time-scale for the animation
 
 function AreaMode() {
   const [curve, setCurve] = useState('spring');   // 'constant' | 'spring' | 'roundtrip' | 'custom'
   const [Fconst, setFconst] = useState(40);       // N, constant force
   const [k, setK] = useState(15);                 // N/m, spring constant
-  const [xPos, setXPos] = useState(AX_MAX);       // path-position of the crate (integration limit)
+  const [xPos, setXPos] = useState(0);            // path-position of the crate (integration limit)
   const [playing, setPlaying] = useState(false);
   // custom curve control-point heights (N), evenly spaced in x
   const [custom, setCustom] = useState(() =>
@@ -411,22 +422,37 @@ function AreaMode() {
   const isRoundTrip = curve === 'roundtrip';
   const pathMax = isRoundTrip ? 2 * AX_MAX : AX_MAX;
 
+  // live refs for the sweep loop
+  const xRef = useRef(xPos); xRef.current = xPos;
+  const dataRef = useRef({ Wc: [], pathMax });
+
   const reset = () => {
-    setCurve('spring'); setFconst(40); setK(15); setXPos(AX_MAX); setPlaying(false);
+    setCurve('spring'); setFconst(40); setK(15); setXPos(0); setPlaying(false);
     setCustom(Array.from({ length: CUSTOM_PTS }, (_, i) => 30 + 25 * Math.sin((i / (CUSTOM_PTS - 1)) * Math.PI)));
   };
 
   // Clamp the crate position whenever the path length changes (switching modes).
   useEffect(() => { setXPos((x) => Math.min(x, pathMax)); }, [pathMax]);
 
-  // play sweep advances the crate along its path (~40 fps for smooth motion)
+  // play sweep: the crate moves at the speed its energy allows. Its kinetic energy
+  // is the launch energy plus the work done so far (from the W(s) curve), so
+  // v = √(2·KE/m); it speeds up where the force does more work. The x(t) plot is
+  // the precomputed trajectory the crate rides (below).
   useEffect(() => {
     if (!playing) return;
+    const dt = 0.025;
     const id = setInterval(() => {
-      setXPos((x) => { if (x >= pathMax) return 0; return Math.min(pathMax, x + pathMax * 0.012); });
+      const { Wc, pathMax: pm } = dataRef.current;
+      const x = xRef.current;
+      const i = Math.max(0, Math.min(AN - 1, Math.round((x / pm) * (AN - 1))));
+      const v = Math.sqrt((2 * Math.max(5, A_KE0 + (Wc[i] || 0))) / A_MASS);
+      let nx = x + v * dt * A_TS;
+      if (nx >= pm) nx = 0;
+      xRef.current = nx;
+      setXPos(nx);
     }, 25);
     return () => clearInterval(id);
-  }, [playing, pathMax]);
+  }, [playing]);
 
   // Force-at-x for the chosen curve (one-way curves only). Custom is linearly
   // interpolated between control points. The spring round-trip is handled below
@@ -475,6 +501,25 @@ function AreaMode() {
     for (let i = 1; i < AN; i++) W[i] = W[i - 1] + 0.5 * (F[i] + F[i - 1]) * ds;
     return { ss: S, Fs: F, Wc: W, sTurn: null };
   }, [Fof, isRoundTrip, k, pathMax]);
+
+  dataRef.current = { Wc, pathMax };  // the sweep loop reads the current work curve
+
+  // Precompute the full x(t) trajectory the crate rides: at each position its
+  // speed is v = √(2·KE/m) with KE = launch + work-so-far, and t accumulates
+  // dt = ds / v. This is deterministic, so the whole curve can be drawn as a
+  // dashed ghost with the crate travelling along it (like the W(s) panel).
+  const traj = useMemo(() => {
+    const tArr = new Array(AN), sArr = new Array(AN);
+    const ds = pathMax / (AN - 1);
+    tArr[0] = 0; sArr[0] = 0;
+    for (let i = 1; i < AN; i++) {
+      sArr[i] = i * ds;
+      const vPrev = Math.sqrt((2 * Math.max(5, A_KE0 + (Wc[i - 1] || 0))) / A_MASS);
+      const vCur = Math.sqrt((2 * Math.max(5, A_KE0 + (Wc[i] || 0))) / A_MASS);
+      tArr[i] = tArr[i - 1] + ds / (0.5 * (vPrev + vCur));
+    }
+    return { tArr, sArr };
+  }, [Wc, pathMax]);
 
   const idx = Math.max(0, Math.min(AN - 1, Math.round((xPos / pathMax) * (AN - 1))));
   const workNow = Wc[idx];
@@ -578,6 +623,21 @@ function AreaMode() {
     ],
   };
 
+  // ── position-vs-time plot: full trajectory as a dashed ghost, the crate
+  //    travelling the solid portion with a marker (matches the W(s) panel style) ──
+  const { tArr, sArr } = traj;
+  const xtTraces = [
+    { x: tArr, y: sArr, type: 'scatter', mode: 'lines', line: { color: 'rgba(91,155,213,0.28)', width: 2, dash: 'dot' }, hoverinfo: 'skip' },
+    { x: tArr.slice(0, idx + 1), y: sArr.slice(0, idx + 1), type: 'scatter', mode: 'lines', line: { color: BLUE, width: 2.5 }, hoverinfo: 'skip' },
+    { x: [tArr[idx]], y: [sArr[idx]], type: 'scatter', mode: 'markers', marker: { color: '#FFFFFF', size: 8, line: { color: BLUE, width: 2 } }, hoverinfo: 'skip' },
+  ];
+  const xtLayout = {
+    showlegend: false,
+    margin: { l: 54, r: 14, t: 8, b: 38 },
+    xaxis: { title: { text: 'time (s)', standoff: 6 }, range: [0, tArr[AN - 1] * 1.02 || 1], autorange: false, zeroline: false, tickfont: { size: 11 } },
+    yaxis: { title: { text: isRoundTrip ? 'path s (m)' : 'position x (m)' }, range: [0, pathMax], autorange: false, zeroline: true, zerolinecolor: '#2A3442', tickfont: { size: 11 } },
+  };
+
   // control-point editor: each slider sets one control-point height (N)
   const setPoint = (i, val) => {
     setCurve('custom');
@@ -657,8 +717,16 @@ function AreaMode() {
       </ControlPanel>
 
       <div className="flex-1 min-w-0 flex flex-col gap-4">
-        <div className="bg-usna-card border border-usna-grid rounded-lg p-4 min-w-0 overflow-hidden" style={{ height: 460 }}>
+        <div className="bg-usna-card border border-usna-grid rounded-lg p-4 min-w-0 overflow-hidden" style={{ height: 420 }}>
           <IntensityPlot traces={traces} layoutOverrides={layout} />
+        </div>
+        <div className="bg-usna-card border border-usna-grid rounded-lg p-3 min-w-0 overflow-hidden" style={{ height: 206 }}>
+          <div className="text-usna-muted text-xs mb-1 px-1 truncate">
+            Position vs time. The dashed curve is the whole trip; the crate rides it, steepening (moving faster) where the force does more work.
+          </div>
+          <div style={{ height: 160 }}>
+            <IntensityPlot traces={xtTraces} layoutOverrides={xtLayout} />
+          </div>
         </div>
         <InfoPanel {...INFO.area} />
       </div>
@@ -675,6 +743,9 @@ function AreaMode() {
 // ═════════════════════════════════════════════════════════════════════════════
 const RAMP_MASS = 40;      // kg, crate mass on the ramp (physical)
 const RAMP_LEN = 8;        // m, physical arc length of the ramp
+const RAMP_VMAX = 7;       // m/s safety cap (rarely hit now that the ramp is never flat)
+const RAMP_TH_BOT = (12 * Math.PI) / 180;  // shallow slope at the bottom
+const RAMP_TH_TOP = (40 * Math.PI) / 180;  // steep slope at the top
 const G = 9.8;
 
 function PowerMode() {
@@ -686,7 +757,7 @@ function PowerMode() {
   const [handicap, setHandicap] = useState(false);   // let the two powers differ
   const [forceA, setForceA] = useState(300);         // N, motor A pull
   const [forceB, setForceB] = useState(100);         // N, motor B pull
-  const [rampPower, setRampPower] = useState(1500);  // W, constant winch power for the climb
+  const [rampPower, setRampPower] = useState(400);   // W, constant winch power for the climb
   const [running, setRunning] = useState(true);
 
   // live control snapshot for the loop
@@ -701,7 +772,7 @@ function PowerMode() {
 
   const reset = () => {
     setVariant('race'); setPower(600); setHandicap(false);
-    setForceA(300); setForceB(100); setRampPower(1500); setRunning(true);
+    setForceA(300); setForceB(100); setRampPower(400); setRunning(true);
   };
 
   useEffect(() => {
@@ -742,34 +813,30 @@ function PowerMode() {
     // ── curved ramp geometry ──
     // A quarter-cosine hill; arc-length is approximated by a fine table so the
     // crate moves at a true metres/second set by v = P/F∥.
-    const ramp = { x0: 60, span: 0, rise: 0, y0: 0, table: null, totalArc: 1 };
+    // incline angle grows linearly from a shallow bottom to a steep top, so it is
+    // never flat (F∥ = mg·sinθ stays well above zero and v = P/F∥ stays finite,
+    // varying smoothly across the whole climb).
+    const slopeAt = (u) => RAMP_TH_BOT + (RAMP_TH_TOP - RAMP_TH_BOT) * u;
+    const ramp = { x0: 60, span: 0, y0: 0, table: null, totalArcPx: 1 };
     const buildRamp = () => {
-      ramp.span = W - 150;
-      ramp.rise = H * 0.5;
-      ramp.y0 = H * 0.82;
-      // slope angle at param u∈[0,1]: y = y0 - rise·(1-cos(uπ/2)) ⇒ steeper near top
+      ramp.span = Math.min(W - 150, H * 1.15);   // cap so the integrated rise fits the frame
+      ramp.x0 = 60;
+      ramp.y0 = H * 0.84;
       const NP = 200;
+      const du = 1 / NP, dx = ramp.span * du;
       const pts = new Array(NP + 1);
-      let acc = 0;
-      let prevX = ramp.x0, prevY = ramp.y0;
-      for (let i = 0; i <= NP; i++) {
+      let acc = 0, y = ramp.y0, prevX = ramp.x0, prevY = ramp.y0;
+      pts[0] = { u: 0, x: ramp.x0, y: ramp.y0, arcPx: 0 };
+      for (let i = 1; i <= NP; i++) {
         const u = i / NP;
         const x = ramp.x0 + ramp.span * u;
-        const y = ramp.y0 - ramp.rise * (1 - Math.cos((u * Math.PI) / 2));
-        if (i > 0) acc += Math.hypot(x - prevX, y - prevY);
+        y -= dx * Math.tan(slopeAt(u - du / 2));   // climb (screen y decreases)
+        acc += Math.hypot(x - prevX, y - prevY);
         pts[i] = { u, x, y, arcPx: acc };
         prevX = x; prevY = y;
       }
       ramp.table = pts;
       ramp.totalArcPx = acc;
-    };
-    // slope angle (above horizontal) at fractional arc position sFrac∈[0,1]
-    const slopeAt = (u) => {
-      // dy/dx of y = y0 - rise(1-cos(uπ/2)); x = x0 + span·u ⇒ du/dx = 1/span
-      const dydu = -ramp.rise * Math.sin((u * Math.PI) / 2) * (Math.PI / 2);
-      const dxdu = ramp.span;
-      const dydx = dydu / dxdu;          // screen slope (y down)
-      return Math.atan2(-dydx, 1);       // physical incline angle above horizontal
     };
     // map physical arc length (m) → screen point + local param u
     const pointAtMeters = (m) => {
@@ -799,7 +866,7 @@ function PowerMode() {
         const marginL = 60;
         const finishX = W - 90;
         const trackLen = finishX - marginL;
-        const distMeters = 8;
+        const distMeters = 18;   // longer track → the faster motor still wins, but at a watchable pace
         const pxPerM = trackLen / distMeters;
         const { PA, PB } = powers();
         const FA = Math.max(1, st.current.forceA);
@@ -830,9 +897,11 @@ function PowerMode() {
           roundRect(cx - 22, y - 10, 44, 36, 6);
           ctx.fillStyle = 'rgba(197,183,131,0.15)'; ctx.fill();
           ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke();
-          drawArrow(ctx, { x: cx + 22, y: y + 8, dx: Math.min(110, 8 + F * 0.22), dy: 0, color, width: 3, label: `F=${F.toFixed(0)} N` });
+          // force arrow (no inline label — it would overlap the arrowhead; the value
+          // is in the lane readout line above instead)
+          drawArrow(ctx, { x: cx + 22, y: y + 8, dx: Math.min(110, 8 + F * 0.22), dy: 0, color, width: 3, head: 9 });
           ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'left'; ctx.fillStyle = color;
-          ctx.fillText(`${label}   v=${v.toFixed(2)} m/s   P=${P.toFixed(0)} W`, marginL, y - 26);
+          ctx.fillText(`${label}   F = ${F.toFixed(0)} N   v = ${v.toFixed(2)} m/s   P = ${P.toFixed(0)} W`, marginL, y - 26);
         };
 
         drawLane(trackAy, posA, FA, vA, PA, GOLD, 'Motor A');
@@ -841,14 +910,15 @@ function PowerMode() {
         ctx.textAlign = 'center'; ctx.font = '15px JetBrains Mono, monospace';
         if (done) {
           ctx.fillStyle = winner === 'tie' ? GREEN : GOLD;
+          const why = st.current.handicap ? 'more power' : 'less force, so more speed at the same power';
           ctx.fillText(winner === 'tie'
-            ? `DEAD HEAT — equal power ⇒ same finish time (${elapsed.toFixed(2)} s)`
-            : `Motor ${winner} wins — more power`, W / 2, H - 22);
+            ? `Dead heat: equal power and equal force give the same finish (${elapsed.toFixed(2)} s)`
+            : `Motor ${winner} wins (${why})`, W / 2, H - 22);
         } else {
           ctx.fillStyle = MUTED;
           ctx.fillText(st.current.handicap
-            ? 'Unequal power — the stronger-power motor pulls ahead'
-            : 'Equal power — crank a force and it just goes slower; still a tie', W / 2, H - 22);
+            ? 'Uneven power: the higher-power motor pulls ahead'
+            : 'Same power: the smaller force gives more speed (v = P/F), so it pulls ahead', W / 2, H - 22);
         }
 
         if (done && running) {
@@ -884,7 +954,7 @@ function PowerMode() {
         const pNow = pointAtMeters(sMeters);
         const slope = slopeAt(pNow.u);
         const Ftan = Math.max(1e-3, RAMP_MASS * G * Math.sin(slope));
-        const v = P / Ftan;                          // m/s — the REAL speed
+        const v = Math.min(RAMP_VMAX, P / Ftan);     // m/s (capped where the ramp is near-flat)
 
         if (running && !done) {
           sMeters += v * dt;
@@ -979,20 +1049,19 @@ function PowerMode() {
                   handicap
                     ? 'bg-usna-gold text-usna-navy border-usna-gold'
                     : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'}`}>
-                {handicap ? '● Handicap ON — unequal power' : 'Handicap: give A more power'}
+                {handicap ? '● Uneven power ON (A stronger)' : 'Give motor A more power'}
               </button>
             </div>
             <Slider label="Motor A force" value={forceA} min={50} max={800} step={10} unit="N" onChange={setForceA} />
             <Slider label="Motor B force" value={forceB} min={50} max={800} step={10} unit="N" onChange={setForceB} />
             <div className="mt-1 text-usna-muted text-xs leading-snug">
-              Force is yours to set; v = P/F is forced on you. Try to "cheat" by
-              cranking a force — the motor only gets slower. Equal power always ties.
+              You set the force; v = P/F follows. Cranking a force only makes that motor slower. At the same power a smaller force wins the distance race; equal force and equal power tie.
             </div>
           </>
         )}
 
         {variant === 'curve' && (
-          <Slider label="Winch power" value={rampPower} min={300} max={4000} step={100} unit="W" onChange={setRampPower} />
+          <Slider label="Winch power" value={rampPower} min={150} max={1200} step={50} unit="W" onChange={setRampPower} />
         )}
 
         <div className="mt-1 border-t border-usna-grid pt-3">
@@ -1011,8 +1080,8 @@ function PowerMode() {
               <Readout label="Motor B power" value={live.pB.toFixed(0)} unit="W" />
               <div className="mt-2 text-xs text-usna-muted leading-snug">
                 {handicap
-                  ? 'Powers differ, so the higher-power motor genuinely wins.'
-                  : 'Same power ⇒ same finish time, no matter how you split force vs speed.'}
+                  ? 'Powers differ, so the higher-power motor wins.'
+                  : 'Same power: a smaller force means a higher speed (v = P/F). Equal force would tie.'}
               </div>
             </>
           ) : (
