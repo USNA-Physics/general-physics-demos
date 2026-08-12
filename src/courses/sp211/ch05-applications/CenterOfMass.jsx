@@ -17,7 +17,7 @@ import InfoPanel from '@shared/components/InfoPanel';
  *              is need not be where any mass is. You can also DRAG the ★ itself:
  *              the selected mass repositions to inverse-solve for the CM you
  *              want, making "where does the average go?" a two-way question.
- *   tumbling : launch an extended rigid body (a wrench / dumbbell of point
+ *   tumbling : launch an extended rigid body (an L-shape / dumbbell of point
  *              masses) as a projectile. In flight it spins at constant angular
  *              velocity (no torque) while the CM follows a = -g. Toggle the
  *              CM-trail on: the visual chaos of the tumbling body resolves into
@@ -513,16 +513,18 @@ const BODIES = {
       { bx: 0, by: 0, m: 0.6 },
     ]),
   },
-  wrench: {
-    label: 'Wrench (lopsided)',
-    // heavy head at one end, light handle — CM near the head
+  ell: {
+    label: 'L-shape (lopsided)',
+    // a right-angle bracket: a vertical arm and a horizontal arm meeting at a
+    // heavier corner, so the CM sits off toward the corner (not at any mass).
+    // Points are listed in path order so the connector traces the "L".
     make: () => balanceAboutCM([
-      { bx: 1.6, by: 0.5, m: 5 },
-      { bx: 1.9, by: -0.5, m: 5 },
-      { bx: 1.0, by: 0, m: 3 },
-      { bx: 0.0, by: 0, m: 1.2 },
-      { bx: -1.0, by: 0, m: 1.0 },
-      { bx: -2.0, by: 0, m: 1.0 },
+      { bx: -1.4, by: 1.6, m: 2 },    // top of the vertical arm
+      { bx: -1.4, by: 0.4, m: 2 },
+      { bx: -1.4, by: -0.8, m: 3.5 }, // corner (heaviest)
+      { bx: -0.2, by: -0.8, m: 2 },
+      { bx: 1.0, by: -0.8, m: 2 },
+      { bx: 2.2, by: -0.8, m: 2 },    // end of the horizontal arm
     ]),
   },
   triangle: {
@@ -550,7 +552,7 @@ function TumblingMode() {
   const [speed, setSpeed] = useState(22);      // m/s launch speed
   const [angle, setAngle] = useState(60);      // deg launch angle
   const [spin, setSpin] = useState(180);       // deg/s angular velocity in flight
-  const [bodyKey, setBodyKey] = useState('wrench');
+  const [bodyKey, setBodyKey] = useState('ell');
   const [trail, setTrail] = useState(false);
   const [strobe, setStrobe] = useState(false); // WOW: stamp whole-body snapshots
   const [explode, setExplode] = useState(false); // PHYSICS: burst at apex
@@ -577,7 +579,7 @@ function TumblingMode() {
 
   const reset = () => {
     setSpeed(22); setAngle(60); setSpin(180);
-    setBodyKey('wrench'); setTrail(false); setStrobe(false);
+    setBodyKey('ell'); setTrail(false); setStrobe(false);
     setExplode(false); setOffPivot(false); setRunning(true);
     relaunch();
   };
@@ -1259,7 +1261,7 @@ const INFO = {
   tumbling: {
     title: 'A tumbling body is a point particle in disguise',
     description:
-      'Launch the wrench and it cartwheels through the air — every point traces a different messy loop. Now flip on the CM trail (and the stroboscope). The chaos collapses into a single clean parabola: the ★ ignores the spin entirely and falls exactly like a thrown ball, because gravity provides no torque about the center of mass. F_ext = M a_cm means the whole extended object moves as if all its mass were concentrated at that one point, with the rotation just decorating the ride.',
+      'Launch the L-shaped body and it cartwheels through the air, and every point traces a different messy loop. Now flip on the CM trail (and the stroboscope). The chaos collapses into a single clean parabola: the ★ ignores the spin entirely and falls exactly like a thrown ball, because gravity provides no torque about the center of mass. F_ext = M a_cm means the whole extended object moves as if all its mass were concentrated at that one point, with the rotation just decorating the ride.',
     equation: String.raw`\sum \vec{F}_{ext} = M\,\vec{a}_{cm}`,
   },
   tumblingExplode: {

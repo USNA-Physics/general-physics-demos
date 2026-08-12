@@ -62,49 +62,44 @@ function DotMode() {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
 
-  const [force, setForce] = useState(80);        // N, rope tension magnitude
+  const [force, setForce] = useState(10);        // N, rope tension magnitude
   const [angle, setAngle] = useState(30);        // deg, rope above horizontal (0..180)
-  const [distance, setDistance] = useState(4);   // m, drag distance
-  const [progress, setProgress] = useState(0);   // 0..1 fraction of the drag
-  const [playing, setPlaying] = useState(false);
+  const [distance, setDistance] = useState(7);   // m, drag distance
+  const [mass, setMass] = useState(20);          // kg, crate mass
+  const [playing, setPlaying] = useState(true);
   const [brake, setBrake] = useState(false);     // brake: force opposes motion (θ=180°)
+
+  // published from the physics loop (drives readouts + the position slider)
+  const [progress, setProgress] = useState(0);   // 0..1 fraction of the drag
+  const [speed, setSpeed] = useState(0);         // m/s current crate speed
 
   // effective angle: braking overrides the slider and points the force straight
   // back along the motion (θ = 180°), the cleanest possible negative-work case.
   const effAngle = brake ? 180 : angle;
 
-  // live values pushed into refs so the rAF loop always sees the latest control
-  const st = useRef({ force, angle: effAngle, distance, progress });
-  st.current = { force, angle: effAngle, distance, progress };
+  // integrated state (owned by the loop) + live controls in a ref
+  const simRef = useRef({ x: 0, v: 0 });
+  const st = useRef({});
+  st.current = { force, angle: effAngle, distance, mass, playing };
 
   const reset = () => {
-    setForce(80); setAngle(30); setDistance(4); setProgress(0); setPlaying(false); setBrake(false);
+    setForce(10); setAngle(30); setDistance(7); setMass(20); setBrake(false); setPlaying(true);
+    simRef.current = { x: 0, v: 0 };
   };
 
   const theta = (effAngle * Math.PI) / 180;
   const fPar = force * Math.cos(theta);   // working component (can be negative)
   const fPerp = force * Math.sin(theta);  // perpendicular component
-  const workTotal = force * distance * Math.cos(theta);
-  const workNow = workTotal * progress;
-
-  // play sweep advances the drag
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 1) { return 0; }
-        return Math.min(1, p + 0.02);
-      });
-    }, 40);
-    return () => clearInterval(id);
-  }, [playing]);
+  const workTotal = fPar * distance;
+  const workNow = fPar * progress * distance;
+  const ke = 0.5 * mass * speed * speed;         // current kinetic energy
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
 
-    let ctx, W, H, raf;
+    let ctx, W, H, raf, lastNow, pub = 0;
 
     const resize = () => {
       W = wrap.clientWidth;
@@ -122,9 +117,34 @@ function DotMode() {
       ctx.closePath();
     };
 
-    const draw = () => {
-      const { force: F, angle: aDeg, distance: d, progress: prog } = st.current;
+    const draw = (now) => {
+      let dt = lastNow === undefined ? 1 / 60 : (now - lastNow) / 1000;
+      lastNow = now;
+      if (!(dt > 0) || dt > 0.1) dt = 1 / 60;
+
+      const { force: F, angle: aDeg, distance: d, mass: m, playing: pl } = st.current;
       const th = (aDeg * Math.PI) / 180;
+
+      // ── physics: the rope's working component accelerates the crate (a = F∥/m) ──
+      // When the rope pulls the crate FORWARD (F∥ > 0) it starts from REST, so the
+      // acceleration a = F∥/m, and hence the mass, is plainly visible (a heavy
+      // crate speeds up slowly). When the rope does zero work (θ = 90°) or negative
+      // work (θ > 90°/brake) the crate instead enters already moving, so we can
+      // watch the force coast it or slow it to a stop.
+      const fPar = F * Math.cos(th);
+      const ENTER_V = 2.5;                       // m/s entry speed for the non-forward cases
+      const sim = simRef.current;
+      if (pl && d > 0.01) {
+        if (sim.x <= 0 && sim.v <= 0.001 && fPar <= 0.05) sim.v = ENTER_V;
+        sim.v += (fPar / m) * dt;
+        sim.x += sim.v * dt;
+        if (sim.x >= d || (sim.v <= 0.01 && fPar <= 0)) {
+          sim.x = 0;
+          sim.v = fPar > 0.05 ? 0 : ENTER_V;     // rest if pulled forward, else re-enter moving
+        }
+        if (sim.x < 0) sim.x = 0;
+      }
+      const prog = d > 0.01 ? Math.max(0, Math.min(1, sim.x / d)) : 0;
 
       ctx.clearRect(0, 0, W, H);
 
@@ -191,7 +211,11 @@ function DotMode() {
       ctx.fillText('crate', cx, topY + crateH / 2);
 
       // ── force vectors from the rope anchor ──
-      const scale = 0.9;                              // px per N (for on-screen length)
+      // Big enough to read at the low default force, with a proportional cap so a
+      // large force can't shoot off the frame (the whole triangle shrinks together,
+      // so the F∥ : F⊥ ratio stays correct).
+      const ARROW_CAP = 175;
+      const scale = F * 12 > ARROW_CAP ? ARROW_CAP / Math.max(F, 0.1) : 12;
       const dxF = F * Math.cos(th) * scale;
       const dyF = -F * Math.sin(th) * scale;          // screen y is down
       // rope line (thin, from anchor outward, drawn under the arrow)
@@ -248,7 +272,7 @@ function DotMode() {
 
       // ── signed work bar (bottom-left): fills right & gold for +W, left & red for −W ──
       const wSigned = fParVal * (d * prog);   // W = F∥ · d  (signed)
-      const wMax = 100 * 8;                            // Fmax·dmax reference (|cos|=1)
+      const wMax = 50 * 8;                             // Fmax·dmax reference (|cos|=1)
       const barH = 12;
       const barY = H - 26;
       const cx0 = 24 + Math.min(W - 200, 240) / 2;     // zero-line (center) of the bar
@@ -273,6 +297,10 @@ function DotMode() {
       ctx.textAlign = 'left';
       ctx.fillText(`${wSigned.toFixed(0)} J`, cx0 + barHalf + 10, barY + barH - 1);
 
+      // publish position + speed to React (throttled) for the readouts / slider
+      pub += dt;
+      if (pub > 0.08) { pub = 0; setProgress(prog); setSpeed(sim.v); }
+
       raf = requestAnimationFrame(draw);
     };
 
@@ -289,10 +317,11 @@ function DotMode() {
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <ControlPanel onReset={reset}>
-        <Slider label="Rope tension (F)" value={force} min={0} max={100} step={5} unit="N" onChange={setForce} />
+        <Slider label="Rope tension (F)" value={force} min={0} max={50} step={1} unit="N" onChange={setForce} />
         <Slider label="Rope angle (θ)" value={angle} min={0} max={180} step={1} unit="°"
                 onChange={(v) => { setBrake(false); setAngle(v); }} />
         <Slider label="Drag distance (d)" value={distance} min={0} max={8} step={0.5} unit="m" onChange={setDistance} />
+        <Slider label="Crate mass (m)" value={mass} min={5} max={50} step={1} unit="kg" onChange={setMass} />
 
         <div className="mt-1 border-t border-usna-grid pt-3">
           <button
@@ -305,7 +334,7 @@ function DotMode() {
             {brake ? '● Braking (θ = 180°)' : 'Apply brake (force backward)'}
           </button>
           <div className="mt-1 text-usna-muted text-xs leading-snug">
-            Brake points the force straight back along the motion — F∥ flips and the work goes negative.
+            Braking points the force straight back along the motion, so F∥ flips and the work goes negative.
           </div>
         </div>
 
@@ -319,23 +348,30 @@ function DotMode() {
             </button>
             <span className="text-usna-muted text-xs">or scrub below</span>
           </div>
-          <Slider label="Progress" value={Number(progress.toFixed(2))} min={0} max={1} step={0.01} unit=""
-                  onChange={(v) => { setPlaying(false); setProgress(v); }} />
+          <Slider label="Position" value={Number(progress.toFixed(2))} min={0} max={1} step={0.01} unit=""
+                  onChange={(v) => { setPlaying(false); simRef.current.x = v * distance; simRef.current.v = 0; setProgress(v); }} />
         </div>
 
         <div className="mt-1 border-t border-usna-grid pt-3">
           <Readout label="F∥ (working)" value={fPar.toFixed(1)} unit="N" />
           <Readout label="F⊥ (no work)" value={fPerp.toFixed(1)} unit="N" />
-          <Readout label="Work so far" value={workNow.toFixed(1)} unit="J" />
-          <Readout label="Total work" value={workTotal.toFixed(1)} unit="J" />
+          <Readout label="Crate speed" value={speed.toFixed(2)} unit="m/s" />
+          <div className="mt-1 pt-1 border-t border-usna-grid">
+            <Readout label="Work so far" value={workNow.toFixed(1)} unit="J" />
+            <Readout label="Total work (over d)" value={workTotal.toFixed(1)} unit="J" />
+            <Readout label="Kinetic energy" value={ke.toFixed(1)} unit="J" />
+            <div className="text-usna-muted text-[11px] mt-1 leading-snug">
+              Frictionless, so the rope is the only working force and the work it does equals the change in kinetic energy (W = ΔKE). A heavier crate gains less speed from the same work.
+            </div>
+          </div>
           {near90 && (
             <div className="mt-2 text-xs text-usna-gold/90 leading-snug">
-              θ ≈ 90°: the force is still {force} N, but it does zero work — all effort, no work.
+              θ ≈ 90°: the force is still {force} N, but it does zero work, so the crate coasts at a steady speed.
             </div>
           )}
           {negative && !near90 && (
             <div className="mt-2 text-xs text-[#D9805B] leading-snug">
-              θ &gt; 90°: F∥ points backward, so the force does NEGATIVE work — it removes energy from the crate.
+              θ &gt; 90°: F∥ points backward, so the force does negative work and the moving crate slows down.
             </div>
           )}
         </div>
@@ -383,12 +419,12 @@ function AreaMode() {
   // Clamp the crate position whenever the path length changes (switching modes).
   useEffect(() => { setXPos((x) => Math.min(x, pathMax)); }, [pathMax]);
 
-  // play sweep advances the crate along its path
+  // play sweep advances the crate along its path (~40 fps for smooth motion)
   useEffect(() => {
     if (!playing) return;
     const id = setInterval(() => {
-      setXPos((x) => { if (x >= pathMax) return 0; return Math.min(pathMax, x + pathMax * 0.02); });
-    }, 40);
+      setXPos((x) => { if (x >= pathMax) return 0; return Math.min(pathMax, x + pathMax * 0.012); });
+    }, 25);
     return () => clearInterval(id);
   }, [playing, pathMax]);
 
@@ -1008,21 +1044,21 @@ function PowerMode() {
 // ═════════════════════════════════════════════════════════════════════════════
 const INFO = {
   dot: {
-    title: 'Work needs a force ALONG the motion',
+    title: 'Work needs a force along the motion',
     description:
-      'Only the component of force in the direction of motion does work: W = F d cosθ. Slide the rope angle toward 90° — the tension is unchanged and the arrow is just as long, but the working component F∥ (green) shrinks to nothing and the work collapses to zero. Push θ past 90° (or hit the brake) and F∥ flips to point backward: the work bar swings left and turns red — the force now does NEGATIVE work, draining energy from the crate. This is why carrying a box horizontally does zero work (force up, motion across, θ = 90°) while a brake pad does negative work on a wheel (force opposes the motion, θ = 180°).',
-    equation: String.raw`W = \vec{F}\cdot\vec{d} = F\,d\cos\theta`,
+      'Only the component of force in the direction of motion does work: W = F d cosθ. As the rope angle moves toward 90°, the tension is unchanged and the arrow is just as long, but the working component F∥ (green) shrinks to nothing and the work falls to zero, so the crate simply coasts. Past 90° (or with the brake on) F∥ points backward: the work goes negative and turns red, and the crate slows as the force drains its kinetic energy. This is why carrying a box horizontally does no work (force up, motion across, θ = 90°), while a brake pad does negative work on a wheel (force opposite the motion). Because the floor is frictionless, the rope is the only working force, so the work it does equals the change in the crate\'s kinetic energy.',
+    equation: String.raw`W = \vec{F}\cdot\vec{d} = F\,d\cos\theta = \Delta KE`,
   },
   area: {
-    title: 'Work = signed area under F(x)',
+    title: 'Work is the signed area under F(x)',
     description:
-      'When the force varies with position, work is the integral of F(x) — and an integral is just accumulated area. The top panel is F(x); the bottom panel grows the running total W(x) = ∫F dx, so the AREA under the top curve equals the HEIGHT of the bottom curve at every instant (the same area↔integral grammar as the motion grapher). A constant force gives a rectangle (W = F d); a spring F = kx gives a triangle (W = ½kx²). On the spring round-trip, pushing out shades gold (positive work) and letting the spring push back shades red (negative work): the areas cancel and the net work returns to zero — the setup for stored potential energy.',
+      'When the force varies with position, the work is the integral of F(x), and an integral is just accumulated area. The top panel shows F(x); the bottom panel grows the running total W(x) = ∫F dx, so the area under the top curve equals the height of the bottom curve at every position (the same area-to-integral relationship as the motion grapher). A constant force gives a rectangle (W = F d); a spring F = kx gives a triangle (W = ½kx²). On the spring round-trip, pushing out shades gold for positive work and letting the spring push back shades red for negative work, so the two areas cancel and the net work returns to zero, which is the setup for stored potential energy.',
     equation: String.raw`W = \int F(x)\,dx \;=\; \text{(signed area under the curve)}`,
   },
   power: {
-    title: 'Power is the RATE of doing work',
+    title: 'Power is the rate of doing work',
     description:
-      'Power is work per unit time, P = F·v. In the race you set each motor\'s force and the speed is forced on you as v = P/F — so trying to "win" by cranking a force just makes that motor slower, and at equal power the two always cross the line together. Flip on the handicap to give one motor more power and it genuinely wins: only more power, not more force, gets you there sooner. On the curved ramp the winch holds its power CONSTANT, so the speed must obey v = P/F∥: where the ramp is steep the tangential force is large and the crate crawls; where it is shallow F∥ is small and the crate surges ahead.',
+      'Power is work per unit time, P = F·v. In the race you set each motor\'s force and the speed follows as v = P/F, so increasing a force only makes that motor slower, and at equal power the two always cross the line together. Turn on the handicap to give one motor more power and it genuinely wins: more power, not more force, is what gets there sooner. On the curved ramp the winch holds its power constant, so the speed obeys v = P/F∥: where the ramp is steep the tangential force is large and the crate crawls, and where it is shallow F∥ is small and the crate surges ahead.',
     equation: String.raw`P = \frac{dW}{dt} = \vec{F}\cdot\vec{v} \;\Rightarrow\; v = \frac{P}{F_\parallel}`,
   },
 };

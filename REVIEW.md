@@ -16,12 +16,14 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 | L4 | D04 · 2D Vector Kinematics | `ch03-motion-2d/vectors` | ✅ |
 | L5 | D05 · Relative Motion | `ch03-motion-2d/relative` | ✅ |
 | L6 | D06 · Projectile Motion | `ch03-motion-2d/projectile` (moved out of Ch2) | ✅ |
-| L7 | D07 · UCM Visualizer | `ch03-motion-2d/ucm` | 🔄 |
-| L9, L10 | D09 · Free-Body Diagram Builder | `ch04-newton/fbd` · fbd/pairs | ⬜ |
-| L11 | D11 · Friction Incline | `ch05-applications/friction` | ⬜ |
-| L12 | D12 · Drag & Terminal Velocity | `ch05-applications/drag` (moved out of Ch2) | ⬜ |
-| L13 | D13 · Banked Curve | `ch05-applications/banked` (moved out of UCM/D07) | ⬜ |
-| L14 | D14 · Center of Mass Playground | `ch05-applications/cm` · default/tumbling | ⬜ |
+| L7 | D07 · UCM Visualizer | `ch03-motion-2d/ucm` | ✅ |
+| L9, L10 | D09 · Free-Body Diagram Builder | `ch04-newton/fbd` · fbd/pairs | ✅ |
+| Ch4 extra | D10 · Newton's 2nd Law (F = ma) | `ch04-newton/second-law` | ✅ |
+| Ch4 extra | D08 · Atwood Machine | `ch04-newton/atwood` | ✅ |
+| L11 | D11 · Friction Incline | `ch05-applications/friction` | ✅ |
+| L12 | D12 · Drag & Terminal Velocity | `ch05-applications/drag` (moved out of Ch2) | ✅ |
+| L13 | D13 · Banked Curve | `ch05-applications/banked` (moved out of UCM/D07) | ✅ |
+| L14 | D14 · Center of Mass Playground | `ch05-applications/cm` · default/tumbling | ✅ |
 | L15–L17 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ⬜ |
 | L18–L20 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ⬜ |
 | L21–L23 | D22 · Collision Sandbox | `ch08-momentum/collisions` · 1d/impulse/2d | ⬜ |
@@ -39,6 +41,91 @@ review (run in a separate session). For each demo: (1) I state the intended goal
 ---
 
 ## Review log
+
+### D14 · Center of Mass Playground — L14 · ✅ solidified
+
+**Route:** `/#/sp211/ch05-applications/cm` (modes: default / tumbling)
+
+**Goal:** CM = mass-weighted average (can lie outside the material); F_ext = M·a_cm; a tumbling body's CM traces a clean parabola; internal forces (explosion) can't move the CM.
+
+**Changes this review:** replaced the phallic "wrench (lopsided)" tumbling body with an **L-shape (right-angle bracket)** with a heavier corner — same lopsided-CM lesson, unmistakably geometric. Updated label, InfoPanel, docstring, and registry moment.
+
+**Verdict:** ✅ Solidified. **Chapter 5 complete** (D11 friction, D12 drag, D13 banked, D14 CM).
+
+### D13 · Banked Curve — L13 · ✅ solidified
+
+**Route:** `/#/sp211/ch05-applications/banked` (shares the UCM `Banked` component)
+
+**Goal:** a banked turn needs a net inward force; design speed v_d = √(r g tanθ) needs no friction; friction flips up-/down-slope across v_d; grip budget (μN) sets when the car breaks loose. Earlier pass fixed the off-the-plane slide and de-AI'd the text.
+
+**Verdict:** ✅ Solidified.
+
+### D12 · Drag & Terminal Velocity — L12 · ✅ solidified
+
+**Route:** `/#/sp211/ch05-applications/drag` (shares the Free Fall family)
+
+**Goal:** drag grows with speed → terminal velocity (asymptote never crossed); heavy-vs-light honest via ballistic coefficient; air twin vs vacuum twin (land together in vacuum); linear vs quadratic drag. RK4-integrated, object presets (feather → skydiver).
+
+**Verdict:** ✅ Solidified (reviewed as-is; no changes needed).
+
+### D11 · Friction Incline — L11 · ✅ solidified
+
+**Route:** `/#/sp211/ch05-applications/friction`
+
+**Goal:** static friction adjusts to hold up to μ_s N, then breaks away at tanθ = μ_s (mass-independent); friction drops discontinuously to kinetic; hysteresis re-sticks only below tanθ = μ_k. Stacked preset carries both weights.
+
+**Changes this review:**
+- **Arrows adaptive + clamped** so they never overflow the canvas; scale sized to the labeled block (readable), oversized ghost arrows clamped.
+- **20 kg comparison ("ghost") block now default off** (single mode shows one block); relabeled toggle.
+- **Theme-aware plot** (legend, θ_crit annotation, critical line, zero-lines follow light/dark) — the app defaults to light mode.
+- **Reset relocates the blocks** to the top of the incline.
+- **New "Separate the two free-body diagrams" option** (stacked) offsetting the two FBDs with leaders + labels.
+- InfoPanel text de-AI'd.
+
+**Verdict:** ✅ Solidified.
+
+### D08 · Atwood Machine — Ch4 (new) · ✅ solidified
+
+**Route:** `/#/sp211/ch04-newton/atwood`
+
+**Goal:** one inextensible string ties two masses to a shared acceleration a = (m₂−m₁)g/(m₁+m₂); tension lies between the weights.
+
+**Behavior:** m₁/m₂ sliders; heavier side falls; per-block T/mg/a arrows; live HUD with a and T; "which side falls" state. Options (default off): **massive pulley** (a = (m₂−m₁)g/(m₁+m₂+M_p/2), split tensions T₁≠T₂ whose difference spins the pulley, chunkier gold pulley) and **energy panel** (boxed widget: PE released = translational KE + rotational KE). Pulley spins (spokes) with the string.
+
+**Verdict:** ✅ Solidified. **Chapter 4 complete** (D09 FBD, D10 F=ma, D08 Atwood).
+
+### D10 · Newton's Second Law (F = ma) — Ch4 (new) · ✅ solidified
+
+**Route:** `/#/sp211/ch04-newton/second-law`
+
+**Goal:** F_net = m·a. Constant net force → constant acceleration → straight-line v(t); double F doubles the slope, double m halves it. Friction: static holds below the limit, then net = applied − kinetic.
+
+**Behavior:** camera-follows a block on a scrolling track; applied-force / mass / kinetic-friction sliders; on-block F/f/a/v arrows + a live `a = F_net/m` HUD; velocity-vs-time strip whose slope is the acceleration.
+
+**Verdict:** ✅ Solidified.
+
+### D09 · Free-Body Diagram Builder — L9 (fbd) · L10 (pairs) · ✅ solidified
+
+**Route:** `/#/sp211/ch04-newton/fbd` and `/pairs`
+
+**Changes this review:**
+- **FBD mode:** per-scene task banner; on-canvas delete (✕ at the selected tip + Delete key + red panel button); "Snap to correct forces" button; fixed balance-point oscillation (freeze drift while dragging + aim from home centre); incline block now rests on the ramp; force polygon walks vectors in angular order instead of collapsing into pairs.
+- **Pairs mode:** fit-to-frame transform (nothing spills out); geometry alignment (block sits on the table slab; horse/cart rest on a common ground line joined by a rope; horse redrawn as a clean block); force/body labels in contrasting pills placed force-aware (widest gap / perpendicular to arrowhead); a collision-resolution pass separates all label pills with dotted leaders.
+- **Text:** InfoPanels, notes, badges, and hints rewritten (no em-dashes, no shouting caps).
+
+**Verdict:** ✅ Solidified. Next: two new Ch4 demos (Newton's 2nd law sandbox, Atwood machine).
+
+### D07 · UCM Vector Visualizer — L7 · ✅ solidified
+
+**Route:** `/#/sp211/ch03-motion-2d/ucm` (single mode after banked was split out)
+
+**Changes this review:**
+- **No-force ghost line fixed:** the dotted tangent now runs from the ghost's fixed release point (marked) to the ghost, instead of swinging back to the still-orbiting bead.
+- **Text refined** (InfoPanel + on-canvas): no em-dashes, no "ask the room", no shouting caps.
+- **Radius made visible:** switched from auto-fit (constant circle size) to a fixed metres→px scale, so a larger radius draws a larger circle; added a 10 m scale bar and an `r = X m` readout.
+- **Banked mode split out to Ch5** as D13 (see below).
+
+**Verdict:** ✅ Solidified.
 
 ### D06 · Projectile Motion — L6 · ✅ solidified
 

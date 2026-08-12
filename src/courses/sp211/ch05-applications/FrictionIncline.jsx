@@ -4,6 +4,7 @@ import Slider from '@shared/components/Slider';
 import Readout from '@shared/components/Readout';
 import InfoPanel from '@shared/components/InfoPanel';
 import IntensityPlot from '@shared/components/IntensityPlot';
+import { useTheme } from '@shared/ThemeContext';
 import { drawArrow } from '@shared/lib/vectorArrow';
 import { setupCanvas } from '@shared/lib/canvas';
 
@@ -90,7 +91,8 @@ const DEFAULTS = {
   massTop: 2,     // kg
   muSTop: 0.30,   // μ_s at the block-on-block interface
   muKTop: 0.20,
-  showGhost: true,
+  showGhost: false, // heavy-block comparison is opt-in (off = a single clean block)
+  spread: false,    // stacked: draw the two FBDs offset so their arrows don't overlap
 };
 
 // ── hook-free wrapper: keeps the default export dispatch dead simple ─────────
@@ -102,6 +104,7 @@ export default function FrictionIncline({ mode = 'default' }) {
 // The one working component (owns every hook).
 // ═════════════════════════════════════════════════════════════════════════════
 function FrictionInclineSim({ mode }) {
+  const { dark } = useTheme();
   const [preset, setPreset] = useState(DEFAULTS.preset);
   const [material, setMaterial] = useState(DEFAULTS.material);
   const [angle, setAngle] = useState(DEFAULTS.angle);
@@ -112,6 +115,7 @@ function FrictionInclineSim({ mode }) {
   const [muSTop, setMuSTop] = useState(DEFAULTS.muSTop);
   const [muKTop, setMuKTop] = useState(DEFAULTS.muKTop);
   const [showGhost, setShowGhost] = useState(DEFAULTS.showGhost);
+  const [spread, setSpread] = useState(DEFAULTS.spread);
 
   const isStacked = preset === 'stacked';
 
@@ -146,7 +150,14 @@ function FrictionInclineSim({ mode }) {
     setMuS(DEFAULTS.muS); setMuK(DEFAULTS.muK); setMass(DEFAULTS.mass);
     setMassTop(DEFAULTS.massTop); setMuSTop(DEFAULTS.muSTop); setMuKTop(DEFAULTS.muKTop);
     setShowGhost(DEFAULTS.showGhost);
+    setSpread(DEFAULTS.spread);
     setReplay(false);
+    // also relocate the blocks back to the top of the incline, at rest
+    simRef.current = {
+      s: 0, v: 0, sliding: false,
+      sTop: 0, vTop: 0, slidingTop: false,
+      sGhost: 0, vGhost: 0, slidingGhost: false,
+    };
   };
 
   // ── physics (angle-only quantities; mass cancels out of the breakaway) ──────
@@ -191,7 +202,7 @@ function FrictionInclineSim({ mode }) {
   paramRef.current = {
     angle, muS, muK, mass, isStacked, massTop, muSTop, muKTop, replay,
     thetaCrit, thetaCritTop, thetaCritGround, thetaStick, thetaStickTop,
-    topSlidesFirst, showGhost, ghostMass: GHOST_MASS,
+    topSlidesFirst, showGhost, spread, ghostMass: GHOST_MASS,
   };
   // Simulation state that survives frames. Each block tracks position, velocity,
   // and a boolean `sliding` flag so hysteresis is a real latch (not recomputed
@@ -325,7 +336,7 @@ function FrictionInclineSim({ mode }) {
   const sawtooth = buildSawtooth({
     mass: isStacked ? mass + massTop : mass,
     muS, muK, thetaCrit, angle,
-    sliding: live.sliding,
+    sliding: live.sliding, dark,
     // in stacked preset the plotted curve is the GROUND interface (pair).
   });
 
@@ -422,7 +433,20 @@ function FrictionInclineSim({ mode }) {
               onChange={(e) => setShowGhost(e.target.checked)}
               className="accent-usna-gold"
             />
-            <span className="text-usna-text text-sm">Show 20 kg ghost block</span>
+            <span className="text-usna-text text-sm">Compare with a 20 kg block (same breakaway angle)</span>
+          </label>
+        )}
+
+        {/* offset the two free-body diagrams (stacked only) */}
+        {isStacked && (
+          <label className="mt-1 mb-1 flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={spread}
+              onChange={(e) => setSpread(e.target.checked)}
+              className="accent-usna-gold"
+            />
+            <span className="text-usna-text text-sm">Separate the two free-body diagrams</span>
           </label>
         )}
 
@@ -551,7 +575,12 @@ function FrictionBar({ fStatic, fKinetic, fMax, atRest }) {
 // The vertical gap at θ_crit between mg sinθ_crit (= μ_s mg cosθ_crit) and
 // μ_k mg cosθ_crit is the μ_s/μ_k jump — the whole point.
 // ═════════════════════════════════════════════════════════════════════════════
-function buildSawtooth({ mass, muS, muK, thetaCrit, angle, sliding }) {
+function buildSawtooth({ mass, muS, muK, thetaCrit, angle, sliding, dark = true }) {
+  // theme-aware ink so the legend, annotation, and marker lines stay legible on
+  // either the dark or the light plot background
+  const ink = dark ? TEXT : '#1A1A2E';
+  const faint = dark ? 'rgba(240,236,227,0.35)' : 'rgba(30,30,60,0.4)';
+  const zl = dark ? '#2A3442' : '#C8C4BC';
   const Nsamp = 120;
   const thetaMax = 70; // degrees plotted
   const staticX = [], staticY = [];
@@ -597,23 +626,23 @@ function buildSawtooth({ mass, muS, muK, thetaCrit, angle, sliding }) {
 
   const layout = {
     showlegend: true,
-    legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 11, color: TEXT } },
+    legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 11, color: ink } },
     margin: { l: 56, r: 14, t: 8, b: 40 },
     xaxis: {
       title: { text: 'Incline angle θ (°)' }, range: [0, thetaMax], autorange: false,
-      zeroline: true, zerolinecolor: '#2A3442',
+      zeroline: true, zerolinecolor: zl,
     },
     yaxis: {
       title: { text: 'Friction force f (N)' }, range: undefined, autorange: true,
-      zeroline: true, zerolinecolor: '#2A3442',
+      zeroline: true, zerolinecolor: zl,
     },
     shapes: [{
       type: 'line', xref: 'x', yref: 'paper', x0: thetaCrit, x1: thetaCrit, y0: 0, y1: 1,
-      line: { color: 'rgba(240,236,227,0.35)', width: 1, dash: 'dash' },
+      line: { color: faint, width: 1, dash: 'dash' },
     }],
     annotations: [{
       x: thetaCrit, y: 1, yref: 'paper', text: `θ_crit ${thetaCrit.toFixed(1)}°`,
-      showarrow: false, font: { color: TEXT, size: 11 }, xanchor: 'left', yanchor: 'top',
+      showarrow: false, font: { color: ink, size: 11 }, xanchor: 'left', yanchor: 'top',
       xshift: 4,
     }],
   };
@@ -716,6 +745,12 @@ function render(ctx, W, H, p, sim) {
 
   const geom = { dnx, dny, ncx, ncy };
 
+  // Force scale (px per newton), sized so the LABELED block's weight arrow is a
+  // readable length. The heavy ghost block is excluded here (it would shrink the
+  // real block's arrows); its own arrows are clamped instead (see drawFBD).
+  const primaryMass = p.isStacked ? (p.mass + p.massTop) : p.mass;
+  const FS = Math.min(2.2, 96 / Math.max(1, primaryMass * G));
+
   if (!p.isStacked) {
     // ── single block (+ optional ghost heavy block side by side) ─────────────
     // We nudge the two blocks to slightly different along-slope start fractions
@@ -727,14 +762,14 @@ function render(ctx, W, H, p, sim) {
         alpha: 0.9, labelColor: TEXT,
       });
       drawFBD(ctx, gb.cx, gb.cy, p, thr, sim.slidingGhost, {
-        mass: p.ghostMass, muS: p.muS, muK: p.muK, ...geom, compact: true, faded: true,
+        mass: p.ghostMass, muS: p.muS, muK: p.muK, ...geom, compact: true, faded: true, FS,
       });
     }
     const b = drawBlock(0.50, sim.s, {
       color: 'rgba(197,183,131,0.30)', tag: `${p.mass} kg`, sliding: sim.sliding,
     });
     drawFBD(ctx, b.cx, b.cy, p, thr, sim.sliding, {
-      mass: p.mass, muS: p.muS, muK: p.muK, ...geom,
+      mass: p.mass, muS: p.muS, muK: p.muK, ...geom, FS,
     });
   } else {
     // ── two-block stack (bottom carries the top's weight) ────────────────────
@@ -769,12 +804,26 @@ function render(ctx, W, H, p, sim) {
 
     // Bottom-block FBD uses the COUPLED normal N₁ = (m₁+m₂)g cosθ and the
     // combined weight arrow; the top block gets the standard single-interface FBD.
-    drawFBD(ctx, bottom.cx, bottom.cy, p, thr, sim.sliding, {
-      mass: p.mass, muS: p.muS, muK: p.muK, ...geom, compact: true,
+    // When "spread" is on, the two FBDs are drawn offset along the slope (bottom
+    // down-slope, top up-slope) with leader lines, so their arrows don't overlap
+    // and each can carry its labels.
+    const spr = p.spread ? blockSize * 1.9 : 0;
+    const bFx = bottom.cx + dnx * spr, bFy = bottom.cy + dny * spr;
+    const tFx = tcx - dnx * spr, tFy = tcy - dny * spr;
+    if (p.spread) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(139,140,142,0.55)';
+      ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(bottom.cx, bottom.cy); ctx.lineTo(bFx, bFy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tcx, tcy); ctx.lineTo(tFx, tFy); ctx.stroke();
+      ctx.setLineDash([]); ctx.restore();
+    }
+    drawFBD(ctx, bFx, bFy, p, thr, sim.sliding, {
+      mass: p.mass, muS: p.muS, muK: p.muK, ...geom, compact: !p.spread, FS,
       supportedMass: p.massTop, // the extra weight pressing down through the top block
     });
-    drawFBD(ctx, tcx, tcy, p, thr, sim.slidingTop, {
-      mass: p.massTop, muS: p.muSTop, muK: p.muKTop, ...geom, compact: true,
+    drawFBD(ctx, tFx, tFy, p, thr, sim.slidingTop, {
+      mass: p.massTop, muS: p.muSTop, muK: p.muKTop, ...geom, compact: !p.spread, FS,
     });
   }
 }
@@ -792,16 +841,26 @@ function drawFBD(ctx, cx, cy, p, thr, sliding, o) {
   const fMax = o.muS * N;
   const f = sliding ? o.muK * N : Math.min(pull, fMax);
 
-  const FS = 2.0;                        // px per newton, tuned for the canvas
+  const FS = o.FS ?? 2.0;                 // px per newton (scene-adaptive; see render)
   const Wmag = mTotalOnSurface * G;      // full (combined) weight magnitude shown
+
+  // Clamp any single arrow to a maximum length so the heavy ghost block (drawn at
+  // the same scale as the labeled block) cannot run off the canvas.
+  const CAP = 116;
+  const clamp = (dx, dy) => {
+    const len = Math.hypot(dx, dy);
+    if (len <= CAP || len === 0) return [dx, dy];
+    const k = CAP / len; return [dx * k, dy * k];
+  };
 
   const alpha = o.faded ? 0.5 : 1;
   ctx.save();
   ctx.globalAlpha = alpha;
 
   // weight straight down (combined when supporting a top block)
+  const [wdx, wdy] = clamp(0, Wmag * FS);
   drawArrow(ctx, {
-    x: cx, y: cy, dx: 0, dy: Wmag * FS, color: GREEN, width: 3,
+    x: cx, y: cy, dx: wdx, dy: wdy, color: GREEN, width: 3,
     label: o.compact ? '' : (supported ? '(m₁+m₂)g' : 'mg'), head: 9,
   });
 
@@ -810,16 +869,18 @@ function drawFBD(ctx, cx, cy, p, thr, sliding, o) {
     drawDashed(ctx, cx, cy, -o.ncx * N * FS, -o.ncy * N * FS, GREEN);
   }
 
-  // normal force, outward along the normal (now taller — it carries both weights)
+  // normal force, outward along the normal (carries both weights when stacked)
+  const [ndx, ndy] = clamp(o.ncx * N * FS, o.ncy * N * FS);
   drawArrow(ctx, {
-    x: cx, y: cy, dx: o.ncx * N * FS, dy: o.ncy * N * FS, color: BLUE, width: 3,
+    x: cx, y: cy, dx: ndx, dy: ndy, color: BLUE, width: 3,
     label: o.compact ? '' : (supported ? 'N₁' : 'N'), head: 9,
   });
 
-  // friction — opposes impending / actual motion, i.e. points UP the slope
+  // friction — opposes impending / actual motion, i.e. points up the slope
   const upx = -o.dnx, upy = -o.dny;
+  const [fdx, fdy] = clamp(upx * f * FS, upy * f * FS);
   drawArrow(ctx, {
-    x: cx, y: cy, dx: upx * f * FS, dy: upy * f * FS,
+    x: cx, y: cy, dx: fdx, dy: fdy,
     color: sliding ? RED : GOLD, width: 3,
     label: o.compact ? '' : (sliding ? 'f_k' : 'f_s'), head: 9,
   });
@@ -842,9 +903,9 @@ function drawDashed(ctx, x, y, dx, dy, color) {
 
 const INFO = {
   default: {
-    title: 'Friction incline — the breakaway',
+    title: 'Friction on an incline: the breakaway',
     description:
-      'Raise the angle in 0.1° steps. While the block is stuck, static friction f_s grows to exactly cancel the down-slope pull mg sinθ — the gold bar climbs toward the μ_s N ceiling (white tick). The instant tanθ = μ_s the bar hits the ceiling and the block lets go. Three surprises. (1) The breakaway angle θ_crit = arctan(μ_s) does NOT depend on mass: the translucent 20 kg ghost block lets go on the same frame as the light one, because both the pull and the ceiling scale with m. (2) The friction-vs-θ plot below is a sawtooth — friction rises as mg sinθ, then DROPS discontinuously to μ_k mg cosθ at θ_crit; the white dot rides the active branch. (3) Hysteresis: once sliding, lower the angle — the block keeps going below θ_crit, only re-sticking when tanθ < μ_k (the smaller re-stick angle). Try the two-block stack: the bottom block’s normal correctly carries both weights, N₁ = (m₁+m₂)g cosθ, and whichever interface has the smaller arctan(μ_s) lets go first.',
+      'Raise the angle in small steps. While the block is stuck, static friction f_s grows to exactly cancel the down-slope pull mg sinθ, so the gold bar climbs toward the μ_s N ceiling (white tick). When tanθ reaches μ_s the bar hits the ceiling and the block lets go. Three results are worth watching. First, the breakaway angle θ_crit = arctan(μ_s) does not depend on mass: turn on the 20 kg comparison block and it lets go on the same frame as the light one, because both the pull and the ceiling scale with the mass. Second, the friction is discontinuous: the friction-vs-θ plot rises as mg sinθ, then drops to μ_k mg cosθ at θ_crit, and the white dot rides whichever branch is active. Third, there is hysteresis: once it is sliding, lowering the angle keeps it moving below θ_crit, and it re-sticks only when tanθ falls below μ_k. In the two-block stack the bottom block\'s normal carries both weights, N₁ = (m₁+m₂)g cosθ, and whichever interface has the smaller arctan(μ_s) lets go first.',
     equation: String.raw`\tan\theta_{\text{crit}} = \mu_s,\quad \tan\theta_{\text{re-stick}} = \mu_k \;\Rightarrow\; a = g(\sin\theta - \mu_k\cos\theta)`,
   },
 };

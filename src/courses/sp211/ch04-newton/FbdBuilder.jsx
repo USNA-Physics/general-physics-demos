@@ -78,8 +78,8 @@ const W_SCALE = 96;
 // scenes that do not specify an expected magnitude; scenes normally override it
 // via expectedForces().
 const FORCE_TYPES = {
-  weight: { label: 'Weight', sym: 'W', color: '#5B9BD5', angle: -90, mag: W_SCALE, hint: 'Gravity — always straight down.' },
-  normal: { label: 'Normal', sym: 'N', color: GREEN, angle: 90, mag: W_SCALE, hint: 'Surface push — perpendicular to the surface.' },
+  weight: { label: 'Weight', sym: 'W', color: '#5B9BD5', angle: -90, mag: W_SCALE, hint: 'Gravity, always straight down.' },
+  normal: { label: 'Normal', sym: 'N', color: GREEN, angle: 90, mag: W_SCALE, hint: 'Surface push, perpendicular to the surface.' },
   tension: { label: 'Tension', sym: 'T', color: GOLD, angle: 0, mag: W_SCALE, hint: 'Pull along a rope, away from the body.' },
   friction: { label: 'Friction', sym: 'f', color: '#D98C5F', angle: 180, mag: W_SCALE * 0.6, hint: 'Along the surface, opposing relative slip.' },
   applied: { label: 'Applied', sym: 'F', color: '#C58BD9', angle: 0, mag: W_SCALE * 0.8, hint: 'A push or pull you apply directly.' },
@@ -116,6 +116,7 @@ function angleDiff(a, b) {
 const SCENES = {
   table: {
     label: 'Block on a table',
+    task: 'Draw every force acting on the block resting on the level table.',
     surfaceAngle: 0,          // horizontal (fixed)
     inclineAdjustable: false,
     target: 'block',
@@ -133,6 +134,7 @@ const SCENES = {
 
   incline: {
     label: 'Block on an incline',
+    task: 'Draw every force acting on the block held at rest on the ramp.',
     surfaceAngle: 28,         // deg above horizontal (ramp rises to the right) — DEFAULT; adjustable
     inclineAdjustable: true,
     target: 'block',
@@ -154,6 +156,7 @@ const SCENES = {
 
   tug: {
     label: 'Tug-of-war (rope + block)',
+    task: 'Draw every force acting on the crate while both teams pull.',
     surfaceAngle: 0,
     inclineAdjustable: false,
     target: 'block',
@@ -172,6 +175,7 @@ const SCENES = {
 
   stacked: {
     label: 'Stacked blocks (A on B)',
+    task: 'Draw every force acting on the top block A (the forces on A, by other objects).',
     surfaceAngle: 0,
     inclineAdjustable: false,
     target: 'blockA',
@@ -189,13 +193,13 @@ const SCENES = {
   },
 
   horsecart: {
-    label: 'Horse & cart (THE paradox)',
+    label: 'Horse and cart',
     surfaceAngle: 0,
     inclineAdjustable: false,
     target: 'cart',
     bodies: {
       horse: { label: 'Horse', kind: 'horse', x: 0.34, y: 0.52, w: 0.22, h: 0.22 },
-      cart: { label: 'Cart', kind: 'cart', x: 0.66, y: 0.54, w: 0.22, h: 0.16 },
+      cart: { label: 'Cart', kind: 'cart', x: 0.66, y: 0.55, w: 0.22, h: 0.16 },
     },
     // fbd target = cart at constant velocity: T forward balances f backward,
     // N balances W → the cart's own FBD closes (Newton's first law).
@@ -230,8 +234,9 @@ const PAIR_SCENES = {
       { id: 'N_on_table', body: 'table', type: 'applied', angle: -90, label: "N′: block pushes table" },
     ],
     partners: { N_on_block: 'N_on_table', N_on_table: 'N_on_block' },
-    extraBodies: { table: { label: 'Table surface', kind: 'ground-body', x: 0.5, y: 0.72, w: 0.5, h: 0.05 } },
-    note: "The block's weight and the table's normal force are NOT a third-law pair — both act on the block. The real pair is: table-pushes-block ⇄ block-pushes-table.",
+    // y chosen so the slab's TOP meets the block's base (block y 0.52 + h/2 0.08 = 0.60).
+    extraBodies: { table: { label: 'Table surface', kind: 'ground-body', x: 0.5, y: 0.625, w: 0.5, h: 0.05 } },
+    note: "The block's weight and the table's normal force are not a third-law pair, because both act on the block. The real pair is the table pushing up on the block and the block pushing down on the table.",
   },
   incline: {
     forces: [
@@ -241,7 +246,7 @@ const PAIR_SCENES = {
     ],
     partners: { N_on_block: 'N_on_ramp', N_on_ramp: 'N_on_block' },
     extraBodies: { ramp: { label: 'Ramp', kind: 'ramp-body', x: 0.5, y: 0.72, w: 0.5, h: 0.05 } },
-    note: 'The ramp pushes perpendicular to its own face; the block pushes back on the ramp with an equal, opposite force — on a different body.',
+    note: 'The ramp pushes perpendicular to its own face, and the block pushes back on the ramp with an equal and opposite force on a different body.',
   },
   tug: {
     forces: [
@@ -262,7 +267,7 @@ const PAIR_SCENES = {
       { id: 'WB', body: 'blockB', type: 'weight', angle: -90, label: 'W_b: Earth pulls B' },
     ],
     partners: { NB_on_A: 'NA_on_B', NA_on_B: 'NB_on_A' },
-    note: "Watch the contact pair: B-pushes-A-up ⇄ A-pushes-B-down. They act on DIFFERENT blocks. A's weight and B's push on A both act on A — those are not a pair.",
+    note: "The contact pair is B pushing A up and A pushing B down, acting on different blocks. A's weight and B's push on A both act on A, so those two are not a pair.",
   },
   horsecart: {
     // The paradox pair: horse pulls cart forward ⇄ cart pulls horse backward.
@@ -272,7 +277,7 @@ const PAIR_SCENES = {
       { id: 'f_ground', body: 'horse', type: 'friction', angle: 0, label: 'f: ground pushes horse →' },
     ],
     partners: { T_on_cart: 'T_on_horse', T_on_horse: 'T_on_cart' },
-    note: 'THE PARADOX: the cart pulls back on the horse exactly as hard as the horse pulls the cart — but those two forces act on DIFFERENT bodies, so they never cancel. The horse still accelerates the system because the GROUND pushes it forward (a separate pair).',
+    note: 'The cart pulls back on the horse exactly as hard as the horse pulls the cart, but those two forces act on different bodies, so they never cancel. The system still accelerates because the ground pushes the horse forward, which is a separate pair.',
   },
 };
 
@@ -281,8 +286,20 @@ const PAIR_SCENES = {
 /* ────────────────────────────────────────────────────────────────────────── */
 
 // Body center + half-extents in canvas px for a given W,H.
-function bodyRect(b, W, H) {
-  return { cx: b.x * W, cy: b.y * H, hw: (b.w * W) / 2, hh: (b.h * H) / 2 };
+function bodyRect(b, W, H, theta = 0) {
+  const hw = (b.w * W) / 2, hh = (b.h * H) / 2;
+  let cx = b.x * W, cy = b.y * H;
+  // A block on the incline sits ON the ramp face: find the surface height at its
+  // x and lift the centre off the surface by half its height along the normal.
+  // (Ramp geometry must match drawScenery.)
+  if (b.kind === 'incline-block' && theta) {
+    const ang = (theta * Math.PI) / 180;
+    const baseY = H * 0.78, x0 = W * 0.07, runW = W * 0.86;
+    const surfY = baseY - (cx - x0) * Math.tan(ang);
+    cx -= hh * Math.sin(ang);
+    cy = surfY - hh * Math.cos(ang);
+  }
+  return { cx, cy, hw, hh };
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -299,15 +316,18 @@ function roundRect(ctx, x, y, w, h, r) {
 // overrides the incline surface angle (fbd mode drives it live from a slider).
 // `offset` shifts the target body's drawn position (equilibrium-meter drift).
 function drawScenery(ctx, scene, bodies, W, H, opts = {}) {
-  const { dimBodies = [], highlightBody = null, theta = scene.surfaceAngle, offset = null, offsetBody = null } = opts;
+  const { dimBodies = [], highlightBody = null, theta = scene.surfaceAngle, offset = null, offsetBody = null, labels = true } = opts;
   ctx.save();
 
-  // ground line for level scenes
-  if (theta === 0) {
+  // ground line for level scenes. Skip it when the scene already includes an
+  // explicit surface body (pairs mode's "Table surface"), so there is only ONE
+  // surface and the block rests directly on it.
+  const hasSurfaceBody = Object.values(bodies).some((b) => b.kind === 'ground-body');
+  if (theta === 0 && !hasSurfaceBody) {
     let gy = H * 0.66;
     // put ground just under the lowest body
     for (const b of Object.values(bodies)) {
-      const r = bodyRect(b, W, H);
+      const r = bodyRect(b, W, H, theta);
       if (b.kind !== 'ground-body' && b.kind !== 'rope-body') gy = Math.max(gy, r.cy + r.hh);
     }
     ctx.strokeStyle = GRID;
@@ -325,7 +345,7 @@ function drawScenery(ctx, scene, bodies, W, H, opts = {}) {
       ctx.lineTo(x - 8, gy + 8);
       ctx.stroke();
     }
-  } else {
+  } else if (theta !== 0) {
     // incline: a wedge rising to the right
     const ang = (theta * Math.PI) / 180;
     const baseY = H * 0.78;
@@ -356,7 +376,7 @@ function drawScenery(ctx, scene, bodies, W, H, opts = {}) {
 
   // bodies
   for (const [key, b] of Object.entries(bodies)) {
-    const base = bodyRect(b, W, H);
+    const base = bodyRect(b, W, H, theta);
     // apply the small drift offset only to the named body (the free body)
     const drift = offset && offsetBody === key ? offset : { x: 0, y: 0 };
     const r = { ...base, cx: base.cx + drift.x, cy: base.cy + drift.y };
@@ -381,37 +401,28 @@ function drawScenery(ctx, scene, bodies, W, H, opts = {}) {
       ctx.stroke();
       ctx.restore();
     } else if (b.kind === 'horse') {
-      // simple stylized horse (body + head + legs)
+      // A plain labelled block (a recognizable horse drawing added noise; the
+      // physics is about the body, so keep it a clean block that rests on the
+      // ground, distinguished from the cart by size and its label).
       ctx.fillStyle = fill;
       ctx.strokeStyle = stroke;
       ctx.lineWidth = 2;
-      roundRect(ctx, r.cx - r.hw, r.cy - r.hh * 0.5, r.hw * 1.6, r.hh, 8);
+      roundRect(ctx, r.cx - r.hw, r.cy - r.hh, r.hw * 2, r.hh * 2, 8);
       ctx.fill();
-      ctx.stroke();
-      // head
-      roundRect(ctx, r.cx - r.hw - 4, r.cy - r.hh * 1.2, r.hw * 0.5, r.hh * 0.9, 5);
-      ctx.fill();
-      ctx.stroke();
-      // legs
-      ctx.beginPath();
-      for (const lx of [-0.6, -0.1, 0.4, 0.9]) {
-        const px = r.cx + lx * r.hw;
-        ctx.moveTo(px, r.cy + r.hh * 0.5);
-        ctx.lineTo(px, r.cy + r.hh * 1.2);
-      }
       ctx.stroke();
     } else if (b.kind === 'cart') {
+      // A block on two wheels; the wheels sit on the ground line (r.cy + r.hh).
       ctx.fillStyle = fill;
       ctx.strokeStyle = stroke;
       ctx.lineWidth = 2;
-      roundRect(ctx, r.cx - r.hw, r.cy - r.hh, r.hw * 2, r.hh, 6);
+      const wheelR = Math.min(11, r.hh * 0.32);
+      roundRect(ctx, r.cx - r.hw, r.cy - r.hh, r.hw * 2, r.hh * 2 - wheelR, 6);
       ctx.fill();
       ctx.stroke();
-      // wheels
       ctx.fillStyle = DEEP;
-      for (const wx of [-0.55, 0.55]) {
+      for (const wx of [-0.58, 0.58]) {
         ctx.beginPath();
-        ctx.arc(r.cx + wx * r.hw, r.cy + r.hh * 0.2, r.hh * 0.4, 0, 2 * Math.PI);
+        ctx.arc(r.cx + wx * r.hw, r.cy + r.hh - wheelR, wheelR, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
       }
@@ -433,13 +444,130 @@ function drawScenery(ctx, scene, bodies, W, H, opts = {}) {
       ctx.stroke();
     }
 
-    // label
-    ctx.globalAlpha = dim ? 0.4 : 0.85;
-    ctx.fillStyle = TEXT;
-    ctx.font = '12px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(b.label, r.cx, r.cy - r.hh - 10);
-    ctx.globalAlpha = 1;
+    // (labels are drawn in a separate pass, on top of the force arrows)
+    if (labels) {
+      ctx.globalAlpha = dim ? 0.4 : 0.85;
+      ctx.fillStyle = TEXT;
+      ctx.font = '12px JetBrains Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label, r.cx, r.cy - r.hh - 10);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // rope / harness linking the horse and cart (only in that scene)
+  if (bodies.horse && bodies.cart) {
+    const hb = bodyRect(bodies.horse, W, H, theta);
+    const cb = bodyRect(bodies.cart, W, H, theta);
+    ctx.strokeStyle = 'rgba(197,183,131,0.7)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(hb.cx + hb.hw, hb.cy + hb.hh * 0.3);
+    ctx.lineTo(cb.cx - cb.hw, cb.cy);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// Direction (physics degrees, +y up) pointing into the WIDEST angular gap between
+// a body's force directions — i.e. the clearest place to put a label. With no
+// forces it returns straight up.
+function widestGapDir(angles) {
+  if (!angles.length) return 90;
+  const s = angles.map((a) => ((a % 360) + 360) % 360).sort((x, y) => x - y);
+  let best = -1, mid = 90;
+  for (let i = 0; i < s.length; i++) {
+    const a = s[i];
+    const b = i + 1 < s.length ? s[i + 1] : s[0] + 360;
+    if (b - a > best) { best = b - a; mid = (a + b) / 2; }
+  }
+  return ((mid % 360) + 360) % 360;
+}
+
+// A dark contrasting label pill centred at (x,y). Text colour is passed in so
+// force labels can carry their force's colour while staying legible on any
+// background.
+function drawLabelPill(ctx, text, x, y, textColor = TEXT, alpha = 1) {
+  const tw = ctx.measureText(text).width;
+  const pw = tw + 12, ph = 18;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(13,19,33,0.9)';
+  roundRect(ctx, x - pw / 2, y - ph / 2, pw, ph, 5); ctx.fill();
+  ctx.strokeStyle = 'rgba(139,140,142,0.4)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, x - pw / 2, y - ph / 2, pw, ph, 5); ctx.stroke();
+  ctx.fillStyle = textColor;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// Push a set of label pills apart so none overlap. Each label is {x,y,halfW,halfH};
+// on every overlapping pair we separate along the axis of least penetration. A few
+// passes settle it. Positions are nudged minimally, so labels stay near their
+// intended spots.
+function separateLabels(labels, iterations = 24) {
+  const padX = 5, padY = 4;
+  for (let it = 0; it < iterations; it++) {
+    let moved = false;
+    for (let i = 0; i < labels.length; i++) {
+      for (let j = i + 1; j < labels.length; j++) {
+        const a = labels[i], b = labels[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const ox = a.halfW + b.halfW + padX - Math.abs(dx);
+        const oy = a.halfH + b.halfH + padY - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          moved = true;
+          if (ox < oy) { const p = (ox / 2) * (dx < 0 ? -1 : 1); a.x -= p; b.x += p; }
+          else { const p = (oy / 2) * (dy < 0 ? -1 : 1); a.y -= p; b.y += p; }
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+// A faint dotted leader from a label pill to its anchor (arrow tip or body), drawn
+// only when the pill has been pushed clear of the anchor.
+function drawLeader(ctx, l) {
+  const dx = l.ax - l.x, dy = l.ay - l.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < l.halfW + 8) return;
+  const ux = dx / dist, uy = dy / dist;
+  ctx.save();
+  ctx.globalAlpha = (l.alpha ?? 1) * 0.6;
+  ctx.strokeStyle = 'rgba(139,140,142,0.8)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 3]);
+  ctx.beginPath();
+  ctx.moveTo(l.x + ux * l.halfW, l.y + uy * l.halfH);
+  ctx.lineTo(l.ax, l.ay);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Body-name labels, drawn AFTER the force arrows so they are never covered. Each
+// pill is placed just OUTSIDE the block in the widest gap between its force
+// arrows, so it avoids the arrows automatically instead of always sitting above.
+function drawBodyLabels(ctx, bodies, W, H, theta, opts = {}) {
+  const { dimBodies = [], offset = null, offsetBody = null, anglesFor = () => [] } = opts;
+  ctx.save();
+  ctx.font = 'bold 12px JetBrains Mono, monospace';
+  for (const [key, b] of Object.entries(bodies)) {
+    if (!b.label) continue;
+    const base = bodyRect(b, W, H, theta);
+    const d = offset && offsetBody === key ? offset : { x: 0, y: 0 };
+    const cx = base.cx + d.x, cy = base.cy + d.y, hw = base.hw, hh = base.hh;
+    // place the pill outside the body edge along the clearest direction
+    const dir = (widestGapDir(anglesFor(key)) * Math.PI) / 180;
+    const ux = Math.cos(dir), uy = -Math.sin(dir); // screen (+y down)
+    const tE = Math.min(hw / Math.max(1e-3, Math.abs(ux)), hh / Math.max(1e-3, Math.abs(uy)));
+    const lx = cx + ux * (tE + 16);
+    const ly = cy + uy * (tE + 13);
+    drawLabelPill(ctx, b.label, lx, ly, TEXT, dimBodies.includes(key) ? 0.45 : 1);
   }
   ctx.restore();
 }
@@ -543,6 +671,16 @@ function FbdMode() {
     setFeedback(null);
   };
 
+  // Replace the current diagram with the scene's exact correct forces.
+  const snapToCorrect = () => {
+    setForces(expected.map((e) => ({
+      uid: `${e.type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: e.type, angle: e.angle, mag: e.mag,
+    })));
+    setSelected(null);
+    setFeedback(null);
+  };
+
   /* ── canvas draw loop ─────────────────────────────────────────────────── */
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -575,8 +713,13 @@ function FbdMode() {
       const balanced = list.length > 0 && netMag <= BALANCE_EPS;
 
       // ── equilibrium meter: drift the body along ΣF when unbalanced ──
+      // Freeze the drift WHILE a tip is being dragged. Otherwise the body moves
+      // under the pointer, which shifts the vector's reference point, which
+      // changes the net force, which flips the balance — a feedback loop that
+      // makes the state oscillate right at the balance point.
       const drift = driftRef.current;
-      if (!balanced && netMag > BALANCE_EPS) {
+      const dragging = !!dragRef.current;
+      if (!dragging && !balanced && netMag > BALANCE_EPS) {
         // spring the drift toward a bounded offset in the ΣF direction
         const cap = 26;
         const ux = net.dx / netMag, uy = net.dy / netMag;
@@ -596,9 +739,10 @@ function FbdMode() {
         theta: th,
         offset: drift,
         offsetBody: scene.target,
+        labels: false,
       });
 
-      const rBase = bodyRect(target, W, H);
+      const rBase = bodyRect(target, W, H, th);
       const r = { cx: rBase.cx + drift.x, cy: rBase.cy + drift.y };
 
       // ── "Show me" ghost of the expected forces, at their target angles ──
@@ -639,6 +783,21 @@ function FbdMode() {
           ctx.fill();
           ctx.stroke();
           ctx.restore();
+          // on-canvas delete handle (× above-right of the selected tip)
+          if (isSel) {
+            const hx = r.cx + dx + 16, hy = r.cy + dy - 16;
+            ctx.save();
+            ctx.fillStyle = '#3A2530';
+            ctx.strokeStyle = '#E86A5C';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(hx, hy, 8, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(hx - 3.2, hy - 3.2); ctx.lineTo(hx + 3.2, hy + 3.2);
+            ctx.moveTo(hx + 3.2, hy - 3.2); ctx.lineTo(hx - 3.2, hy + 3.2);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
 
         // net-force resultant (bold when nonzero, from the body center)
@@ -661,8 +820,16 @@ function FbdMode() {
 
         // ── balanced badge snapped on the body ──
         if (balanced) {
-          drawBalancedBadge(ctx, r.cx, r.cy - bodyRect(target, W, H).hh - 30);
+          drawBalancedBadge(ctx, r.cx, r.cy - bodyRect(target, W, H, th).hh - 30);
         }
+      }
+
+      // body-name labels last, placed in the clear gap between the forces
+      if (!polygonRef.current) {
+        drawBodyLabels(ctx, scene.bodies, W, H, th, {
+          anglesFor: (k) => (k === scene.target ? list.map((f) => f.angle) : []),
+          offset: drift, offsetBody: scene.target,
+        });
       }
 
       raf = requestAnimationFrame(draw);
@@ -688,12 +855,28 @@ function FbdMode() {
     const onDown = (ev) => {
       if (polygonRef.current) return; // no tip-dragging in polygon view
       const { W, H } = geomRef.current;
-      const rBase = bodyRect(target, W, H);
+      const rBase = bodyRect(target, W, H, thetaRef.current);
       const d = driftRef.current;
       const r = { cx: rBase.cx + d.x, cy: rBase.cy + d.y };
       const p = localPt(ev);
-      // hit-test tips first (topmost wins → iterate reversed)
       const list = forcesRef.current;
+      // (0) delete handle on the currently-selected force's tip
+      const selUid = selRef.current;
+      if (selUid != null) {
+        const sf = list.find((x) => x.uid === selUid);
+        if (sf) {
+          const { dx, dy } = polar(sf.angle, sf.mag);
+          const hx = r.cx + dx + 16, hy = r.cy + dy - 16;
+          if (Math.hypot(p.x - hx, p.y - hy) < 12) {
+            setForces((f) => f.filter((x) => x.uid !== selUid));
+            setSelected(null);
+            setFeedback(null);
+            ev.preventDefault();
+            return;
+          }
+        }
+      }
+      // hit-test tips (topmost wins → iterate reversed)
       for (let i = list.length - 1; i >= 0; i--) {
         const f = list[i];
         const { dx, dy } = polar(f.angle, f.mag);
@@ -714,11 +897,11 @@ function FbdMode() {
       const d = dragRef.current;
       if (!d) return;
       const { W, H } = geomRef.current;
-      const rBase = bodyRect(target, W, H);
-      const off = driftRef.current;
-      const r = { cx: rBase.cx + off.x, cy: rBase.cy + off.y };
+      // Aim relative to the body's HOME centre (not the drifting one) so the
+      // vector is stable while the meter animates — no balance-point oscillation.
+      const rBase = bodyRect(target, W, H, thetaRef.current);
       const p = localPt(ev);
-      const dx = p.x - r.cx, dy = p.y - r.cy;
+      const dx = p.x - rBase.cx, dy = p.y - rBase.cy;
       const ang = angleOf(dx, dy);
       const mag = Math.max(24, Math.min(160, Math.hypot(dx, dy)));
       setForces((f) => f.map((x) => (x.uid === d.uid ? { ...x, angle: ang, mag } : x)));
@@ -745,6 +928,21 @@ function FbdMode() {
     };
   }, [target]);
 
+  /* ── keyboard: Delete / Backspace removes the selected force ───────────── */
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selRef.current != null) {
+        const uid = selRef.current;
+        setForces((f) => f.filter((x) => x.uid !== uid));
+        setSelected(null);
+        setFeedback(null);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   /* ── palette drop: tap-to-add + pointer-drag-to-aim ───────────────────── */
   const paletteDrag = useRef(null); // { type }
   const onPaletteDown = (type) => (ev) => {
@@ -769,7 +967,7 @@ function FbdMode() {
           // aim the new force toward the drop point from the body center
           const { W, H } = geomRef.current;
           const off = driftRef.current;
-          const rBase = bodyRect(target, W, H);
+          const rBase = bodyRect(target, W, H, thetaRef.current);
           const dx = e.clientX - rect.left - (rBase.cx + off.x);
           const dy = e.clientY - rect.top - (rBase.cy + off.y);
           const ang = Math.hypot(dx, dy) > 12 ? angleOf(dx, dy) : FORCE_TYPES[type].angle;
@@ -866,10 +1064,13 @@ function FbdMode() {
             />
             <button
               onClick={() => removeForce(selForce.uid)}
-              className="mt-1 w-full py-1.5 rounded text-xs font-medium bg-usna-deep text-usna-muted hover:text-red-300 border border-usna-grid transition-colors"
+              className="mt-1 w-full py-1.5 rounded text-xs font-semibold bg-red-900/30 text-red-200 hover:bg-red-900/50 border border-red-800/70 transition-colors"
             >
-              Remove this force
+              ✕ Remove this force
             </button>
+            <div className="text-usna-muted text-[11px] mt-1 leading-snug">
+              Or click the ✕ on its tip, or press Delete.
+            </div>
           </div>
         )}
 
@@ -893,6 +1094,12 @@ function FbdMode() {
             </button>
           )}
           <button
+            onClick={snapToCorrect}
+            className="w-full py-2 rounded text-sm font-medium border border-usna-grid bg-usna-deep text-usna-text hover:border-green-500 hover:text-green-200 transition-colors"
+          >
+            Snap to correct forces
+          </button>
+          <button
             onClick={() => setPolygon((p) => !p)}
             className={`w-full py-2 rounded text-sm font-medium border transition-colors ${
               polygon
@@ -910,7 +1117,7 @@ function FbdMode() {
                      : forces.length ? 'bg-red-900/25 text-red-200 border border-red-800/70'
                      : 'bg-usna-deep text-usna-muted border border-usna-grid'
           }`}>
-            {balanced ? '⚖ Balanced — a = 0'
+            {balanced ? '⚖ Balanced · a = 0'
               : forces.length ? '⚠ Net force → accelerating'
               : 'No forces yet'}
           </div>
@@ -926,6 +1133,10 @@ function FbdMode() {
       </ControlPanel>
 
       <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div className="flex items-start gap-2 rounded-lg border border-usna-gold/40 bg-usna-gold/10 px-3 py-2">
+          <span className="mt-0.5 px-2 py-0.5 rounded bg-usna-gold text-usna-navy font-semibold text-[11px] shrink-0">TASK</span>
+          <span className="text-usna-text text-sm">{scene.task}</span>
+        </div>
         <div
           ref={wrapRef}
           className="relative bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden"
@@ -933,12 +1144,12 @@ function FbdMode() {
         >
           <canvas ref={canvasRef} className="block" />
           <div className="absolute top-2 left-3 text-xs font-mono text-usna-muted pointer-events-none">
-            {polygon ? 'tip-to-tail: closed polygon ⇒ ΣF = 0' : "drag a force's tip to aim & stretch it"}
+            {polygon ? 'tip-to-tail: closed polygon ⇒ ΣF = 0' : "drag a tip to aim · click ✕ or press Delete to remove"}
           </div>
           {forces.length === 0 && !polygon && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-usna-muted text-sm bg-usna-deep/70 px-4 py-2 rounded">
-                Add forces from the palette to build the diagram
+                Tap a force in the palette to start building the diagram
               </div>
             </div>
           )}
@@ -973,7 +1184,12 @@ function drawForcePolygon(ctx, list, W, H, net) {
   ctx.arc(ox, oy, 3.5, 0, 2 * Math.PI);
   ctx.fill();
 
-  for (const f of list) {
+  // Walk the vectors in ANGULAR order (not add-order). Adding them tip-to-tail
+  // by direction sweeps a proper closed polygon; the raw order tends to pair a
+  // force with its cancelling opposite and collapse the path onto a line.
+  const norm = (a) => ((a % 360) + 360) % 360;
+  const ordered = [...list].sort((a, b) => norm(a.angle) - norm(b.angle));
+  for (const f of ordered) {
     const t = FORCE_TYPES[f.type];
     const { dx, dy } = polar(f.angle, f.mag);
     drawArrow(ctx, { x, y, dx, dy, color: t.color, width: 3.5, label: t.sym, head: 11 });
@@ -992,7 +1208,7 @@ function drawForcePolygon(ctx, list, W, H, net) {
       ctx.lineTo(ox, oy);
       ctx.stroke();
       ctx.setLineDash([]);
-      drawBalancedBadge(ctx, ox, oy - 40, 'closed — ΣF = 0');
+      drawBalancedBadge(ctx, ox, oy - 40, 'closed · ΣF = 0');
     } else {
       // the gap = net force
       ctx.setLineDash([6, 5]);
@@ -1007,7 +1223,7 @@ function drawForcePolygon(ctx, list, W, H, net) {
 }
 
 // Snap a green equilibrium badge near (x,y).
-function drawBalancedBadge(ctx, x, y, text = '⚖ balanced — a = 0') {
+function drawBalancedBadge(ctx, x, y, text = '⚖ balanced · a = 0') {
   ctx.save();
   ctx.font = 'bold 13px JetBrains Mono, monospace';
   ctx.textAlign = 'center';
@@ -1205,9 +1421,12 @@ function PairsMode() {
   // center; render offsets keep multiple forces on one body legible.
   const forceOrigin = useCallback((f, W, H) => {
     const b = bodies[f.body];
-    const r = bodyRect(b, W, H);
+    const r = bodyRect(b, W, H, theta);
     return { x: r.cx, y: r.cy };
-  }, [bodies]);
+  }, [bodies, theta]);
+
+  // Fit transform (scale + translate) so the whole scene stays in frame.
+  const fitRef = useRef({ s: 1, tx: 0, ty: 0 });
 
   /* draw loop */
   useEffect(() => {
@@ -1243,63 +1462,120 @@ function PairsMode() {
         }
         dimBodies = Object.keys(bodiesRef.current).filter((k) => !active.has(k));
       }
-      drawScenery(ctx, scene, bodiesRef.current, W, H, { dimBodies, theta });
 
-      // draw every pre-placed force
-      for (const f of pair.forces) {
-        const t = FORCE_TYPES[f.type];
+      // ── precompute each force's geometry + a label position ──
+      // The label pill sits BESIDE the arrowhead (perpendicular to the shaft), on
+      // whichever side keeps it furthest inside the frame — so it never runs down
+      // the shaft or straight into a neighbouring body.
+      ctx.font = 'bold 12px JetBrains Mono, monospace';
+      const fdata = pair.forces.map((f) => {
         const o = forceOrigin(f, W, H);
         const { dx, dy } = polar(f.angle, 92);
-        const isSel = f.id === sel;
-        const isPartner = f.id === partner;
-        let color = t.color;
-        let alpha = 1;
-        if (sel) {
-          if (isSel) color = GOLD;
-          else if (isPartner) color = GREEN;
-          else alpha = 0.25;
-        }
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        if (isSel || isPartner) {
-          // glow
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 14;
-        }
-        drawArrow(ctx, {
-          x: o.x, y: o.y, dx, dy, color,
-          width: isSel || isPartner ? 5.5 : 3.5,
-          label: f.label, head: 13,
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const tipX = o.x + dx, tipY = o.y + dy;
+        const halfW = (ctx.measureText(f.label).width + 12) / 2;
+        const off = halfW + 8;
+        const px = -uy, py = ux; // perpendicular
+        const c1 = { x: tipX + px * off, y: tipY + py * off };
+        const c2 = { x: tipX - px * off, y: tipY - py * off };
+        const edge = (c) => Math.min(c.x, W - c.x, c.y, H - c.y);
+        const lab = edge(c1) >= edge(c2) ? c1 : c2;
+        return { f, o, dx, dy, tipX, tipY, lab, halfW };
+      });
+
+      // colour / alpha for a force id
+      const forceColor = (f) => {
+        if (!sel) return FORCE_TYPES[f.type].color;
+        if (f.id === sel) return GOLD;
+        if (f.id === partner) return GREEN;
+        return FORCE_TYPES[f.type].color;
+      };
+      const forceAlpha = (f) => (sel && f.id !== sel && f.id !== partner ? 0.25 : 1);
+
+      // ── build every label (force + body) as a movable pill, then de-overlap ──
+      const labels = [];
+      for (const d of fdata) {
+        labels.push({
+          text: d.f.label, x: d.lab.x, y: d.lab.y, ax: d.tipX, ay: d.tipY,
+          halfW: d.halfW, halfH: 9, color: forceColor(d.f), alpha: forceAlpha(d.f),
         });
-        ctx.restore();
-        // clickable tip dot
+      }
+      for (const [key, b] of Object.entries(bodiesRef.current)) {
+        if (!b.label) continue;
+        const br = bodyRect(b, W, H, theta);
+        const angs = pair.forces.filter((f) => f.body === key).map((f) => f.angle);
+        const dir = (widestGapDir(angs) * Math.PI) / 180;
+        const ux = Math.cos(dir), uy = -Math.sin(dir);
+        const tE = Math.min(br.hw / Math.max(1e-3, Math.abs(ux)), br.hh / Math.max(1e-3, Math.abs(uy)));
+        labels.push({
+          text: b.label, x: br.cx + ux * (tE + 16), y: br.cy + uy * (tE + 13),
+          ax: br.cx, ay: br.cy,
+          halfW: (ctx.measureText(b.label).width + 12) / 2, halfH: 9,
+          color: TEXT, alpha: dimBodies.includes(key) ? 0.45 : 1,
+        });
+      }
+      separateLabels(labels);
+
+      // ── fit the scene (bodies + arrows + FINAL label pills) into the frame ──
+      const margin = 18;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      const acc = (x, y) => { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; };
+      for (const key of Object.keys(bodiesRef.current)) {
+        const r = bodyRect(bodiesRef.current[key], W, H, theta);
+        acc(r.cx - r.hw, r.cy - r.hh); acc(r.cx + r.hw, r.cy + r.hh);
+      }
+      for (const d of fdata) { acc(d.o.x, d.o.y); acc(d.tipX, d.tipY); }
+      for (const l of labels) { acc(l.x - l.halfW, l.y - l.halfH); acc(l.x + l.halfW, l.y + l.halfH); }
+      const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+      const s = Math.min(1, (W - 2 * margin) / bw, (H - 2 * margin) / bh);
+      const tx = W / 2 - s * (minX + maxX) / 2;
+      const ty = H / 2 - s * (minY + maxY) / 2;
+      fitRef.current = { s, tx, ty };
+
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.scale(s, s);
+      drawScenery(ctx, scene, bodiesRef.current, W, H, { dimBodies, theta, labels: false });
+
+      // arrows + tip dots (no inline labels)
+      for (const d of fdata) {
+        const isHi = d.f.id === sel || d.f.id === partner;
+        const color = forceColor(d.f), alpha = forceAlpha(d.f);
         ctx.save();
         ctx.globalAlpha = alpha;
-        ctx.fillStyle = isSel || isPartner ? TEXT : color;
-        ctx.beginPath();
-        ctx.arc(o.x + dx, o.y + dy, 6, 0, 2 * Math.PI);
-        ctx.fill();
+        if (isHi) { ctx.shadowColor = color; ctx.shadowBlur = 14; }
+        drawArrow(ctx, { x: d.o.x, y: d.o.y, dx: d.dx, dy: d.dy, color, width: isHi ? 5.5 : 3.5, head: 13 });
+        ctx.restore();
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = isHi ? TEXT : color;
+        ctx.beginPath(); ctx.arc(d.tipX, d.tipY, 6, 0, 2 * Math.PI); ctx.fill();
         ctx.restore();
       }
 
-      // connecting brace between a selected pair (visual "these two go together")
+      // connecting brace between a selected pair
       if (sel && partner) {
-        const sf = pair.forces.find((x) => x.id === sel);
-        const pf = pair.forces.find((x) => x.id === partner);
+        const sf = fdata.find((d) => d.f.id === sel);
+        const pf = fdata.find((d) => d.f.id === partner);
         if (sf && pf) {
-          const a = forceOrigin(sf, W, H);
-          const b = forceOrigin(pf, W, H);
           ctx.save();
           ctx.setLineDash([4, 6]);
           ctx.strokeStyle = 'rgba(197,183,131,0.5)';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
+          ctx.moveTo(sf.o.x, sf.o.y);
+          ctx.lineTo(pf.o.x, pf.o.y);
           ctx.stroke();
           ctx.restore();
         }
       }
+
+      // leaders then pills, on top of everything
+      for (const l of labels) drawLeader(ctx, l);
+      for (const l of labels) drawLabelPill(ctx, l.text, l.x, l.y, l.color, l.alpha);
+
+      ctx.restore(); // end fit transform
 
       raf = requestAnimationFrame(draw);
     };
@@ -1318,13 +1594,16 @@ function PairsMode() {
 
     const onDown = (ev) => {
       const rect = canvas.getBoundingClientRect();
-      const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+      // undo the fit transform so hit-testing matches what is drawn
+      const { s, tx, ty } = fitRef.current;
+      const px = (ev.clientX - rect.left - tx) / s;
+      const py = (ev.clientY - rect.top - ty) / s;
       const { W, H } = geomRef.current;
       // topmost first
       for (let i = pair.forces.length - 1; i >= 0; i--) {
         const f = pair.forces[i];
         const b = bodies[f.body];
-        const r = bodyRect(b, W, H);
+        const r = bodyRect(b, W, H, theta);
         const { dx, dy } = polar(f.angle, 92);
         // distance from point to the arrow segment
         if (distToSegment(px, py, r.cx, r.cy, r.cx + dx, r.cy + dy) < 12) {
@@ -1380,22 +1659,32 @@ function PairsMode() {
 
         {selForce && (
           <div className="mt-3 border-t border-usna-grid pt-3 text-sm">
-            <div className="text-usna-gold font-medium mb-1">Selected</div>
-            <div className="text-usna-text mb-2">{selForce.label}</div>
             {partnerForce ? (
               <>
-                <div className="text-green-300 font-medium mb-1">Third-law partner</div>
-                <div className="text-usna-text mb-2">{partnerForce.label}</div>
+                <div className="rounded bg-usna-deep border border-usna-grid p-2 text-xs leading-snug mb-2">
+                  <div>
+                    <span className="text-usna-gold font-medium">{selForce.label}</span>
+                    <span className="text-usna-muted"> acts on {bodies[selForce.body].label}</span>
+                  </div>
+                  <div className="text-usna-muted text-center my-1">⇕ equal and opposite</div>
+                  <div>
+                    <span className="text-green-300 font-medium">{partnerForce.label}</span>
+                    <span className="text-usna-muted"> acts on {bodies[partnerForce.body].label}</span>
+                  </div>
+                </div>
                 <div className="text-usna-muted text-xs leading-snug">
-                  Equal magnitude, opposite direction, and — crucially — acting on a
-                  DIFFERENT body ({bodies[partnerForce.body].label}).
+                  Same size, opposite direction, but acting on different bodies, so
+                  the pair can never cancel on one body's free-body diagram.
                 </div>
               </>
             ) : (
-              <div className="text-usna-muted text-xs leading-snug">
-                This force's third-law partner acts on a body that is off-screen
-                (e.g. the Earth, for weight). It's still equal and opposite.
-              </div>
+              <>
+                <div className="text-usna-gold font-medium mb-1">{selForce.label}</div>
+                <div className="text-usna-muted text-xs leading-snug">
+                  Its third-law partner acts on a body that is off-screen (the Earth,
+                  for weight). It is still equal and opposite.
+                </div>
+              </>
             )}
           </div>
         )}
@@ -1510,13 +1799,13 @@ function fmt(n) {
 const FBD_INFO = {
   title: 'Build the free-body diagram',
   description:
-    'A free-body diagram shows every force acting ON the body — and nothing else. Add each force from the palette, drag its tip to aim AND size it, and watch ΣF update. The counterintuitive moment on the incline: weight is ALWAYS straight down, but the normal force tilts with the ramp and shrinks (N = W·cos θ) while friction along the slope grows (f = W·sin θ). Get all three right and the diagram CLOSES to ΣF ≈ 0 — the equilibrium meter turns green. Flip to the tip-to-tail polygon to see closure geometrically, drag the incline-angle slider to explore the whole family, and hit "Check" then "Show me" for force-by-force guidance.',
+    'A free-body diagram shows every force acting on the body, and nothing else. Add each force from the palette, drag its tip to aim and size it, and watch the net force update. The instructive case is the incline: weight is always straight down, but the normal force tilts with the ramp and shrinks (N = W·cos θ) while friction along the slope grows (f = W·sin θ). Get all three right and the diagram closes to a net force of about zero, and the equilibrium meter turns green. Switch to the tip-to-tail polygon to see that closure geometrically, use the incline-angle slider to explore the whole family, and use Check and then Show me for force-by-force guidance.',
   equation: String.raw`\vec F_{net} = \sum \vec F_i = m\,\vec a, \qquad N = W\cos\theta,\; f = W\sin\theta`,
 };
 
 const PAIRS_INFO = {
   title: "Newton's third law: partners live on different bodies",
   description:
-    'For every force there is an equal and opposite reaction — but the two act on DIFFERENT bodies, so they can never cancel on a single free-body diagram. Click a force to light up its partner across the gap. The horse-and-cart paradox is the payoff: the cart pulls back on the horse exactly as hard as the horse pulls the cart, yet the cart still accelerates, because the reaction acts on the horse, not the cart — and the ground pushes the horse forward.',
+    'For every force there is an equal and opposite reaction, but the two act on different bodies, so they can never cancel on a single free-body diagram. Click a force to light up its partner across the gap. The horse-and-cart case is the payoff: the cart pulls back on the horse exactly as hard as the horse pulls the cart, yet the cart still accelerates, because that reaction acts on the horse rather than the cart, while the ground pushes the horse forward.',
   equation: String.raw`\vec F_{A\to B} = -\,\vec F_{B\to A}`,
 };
