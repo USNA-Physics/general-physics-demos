@@ -8,7 +8,7 @@ import Readout from '@shared/components/Readout';
 import InfoPanel from '@shared/components/InfoPanel';
 import { airyIntensity } from '../lib/physics';
 import { makeTrace } from '@shared/lib/plotly';
-import { setupCanvas } from '@shared/lib/canvas';
+import { setupCanvas, effectiveDpr } from '@shared/lib/canvas';
 import { wavelengthToRGB } from '@shared/lib/color';
 
 const DEFAULTS = {
@@ -133,7 +133,7 @@ export default function Rayleigh() {
     const timer = setTimeout(() => {
       const ctx = setupCanvas(canvas, size, size);
       const { r: cr, g: cg, b: cb } = wavelengthToRGB(lambda);
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = effectiveDpr(); // must match setupCanvas' capped DPR or putImageData mis-sizes
       const pxSize = Math.round(size * dpr);
       const imageData = ctx.createImageData(pxSize, pxSize);
       const data = imageData.data;

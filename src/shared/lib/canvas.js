@@ -4,11 +4,28 @@
 import { wavelengthToRGB } from './color';
 
 /**
+ * Effective device pixel ratio, capped at MAX_DPR.
+ *
+ * Every animated demo redraws its canvas each frame, and the per-frame fill cost
+ * scales with dpr². Phones report dpr 3 — 9× the pixels of a 1× display — which
+ * pins the mobile main thread and makes on-screen controls feel dead (taps queue
+ * behind draw frames). Capping at 2 removes most of that cost with no visible
+ * quality loss.
+ *
+ * Desktop displays are dpr 1 or 2, so the cap is a no-op there and rendering is
+ * pixel-identical. This must never change desktop output.
+ */
+export const MAX_DPR = 2;
+export function effectiveDpr() {
+  return Math.min(window.devicePixelRatio || 1, MAX_DPR);
+}
+
+/**
  * Set up a canvas for retina / high-DPI displays.
  * Returns the 2D context with the scale already applied.
  */
 export function setupCanvas(canvas, width, height) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveDpr();
   canvas.width = width * dpr;
   canvas.height = height * dpr;
   canvas.style.width = width + 'px';
@@ -23,7 +40,7 @@ export function setupCanvas(canvas, width, height) {
  */
 export function renderScreenStrip(ctx, width, height, intensityFn, xRange, wavelengthNm, gamma = 1) {
   const { r, g, b } = wavelengthToRGB(wavelengthNm);
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveDpr();
   const imgWidth = Math.round(width * dpr);
   const imgHeight = Math.round(height * dpr);
   const imageData = ctx.createImageData(imgWidth, imgHeight);
@@ -52,7 +69,7 @@ export function renderScreenStrip(ctx, width, height, intensityFn, xRange, wavel
  */
 export function renderAiryDisk(ctx, size, intensityFn, rMax, wavelengthNm, gamma = 1) {
   const { r: cr, g: cg, b: cb } = wavelengthToRGB(wavelengthNm);
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveDpr();
   const pxSize = Math.round(size * dpr);
   const imageData = ctx.createImageData(pxSize, pxSize);
   const data = imageData.data;

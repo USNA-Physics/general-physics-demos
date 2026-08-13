@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LayoutGroup, AnimatePresence, motion } from 'framer-motion';
 import ProjectileArc from './demos/ProjectileArc';
@@ -23,6 +23,9 @@ import SpringSHM from './demos/SpringSHM';
  * hard cut. Live experiments are embedded directly; video/audio are local files.
  *
  * Keys:  →/Space next · ← prev · F fullscreen · N speaker notes · Esc exit
+ * Touch: swipe left/right to advance, plus on-screen controls (shown only on
+ *        coarse-pointer devices). The keyboard path is unchanged, so desktop
+ *        behavior is identical — the touch affordances are purely additive.
  */
 const MEDIA = `${import.meta.env.BASE_URL}media/semester-preview/`;
 
@@ -84,6 +87,37 @@ export default function SemesterPreview() {
     if (idx >= 0) setI(idx);
   }, [STEPS]);
 
+  const exit = useCallback(() => {
+    if (document.fullscreenElement) { document.exitFullscreen?.(); return; }
+    navigate('/sp211');
+  }, [navigate]);
+
+  // Touch navigation (additive; never fires for a desktop mouse). A swipe that
+  // begins on an interactive demo control is ignored so slider drags and canvas
+  // interactions inside a slide aren't hijacked as slide changes.
+  const touchRef = useRef(null);
+  const coarse = useMemo(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches,
+    [],
+  );
+  const onTouchStart = useCallback((e) => {
+    const t = e.touches[0];
+    const onControl = e.target.closest?.('canvas, input, button, a, audio, video, [role="slider"]');
+    touchRef.current = onControl ? null : { x: t.clientX, y: t.clientY };
+  }, []);
+  const onTouchEnd = useCallback((e) => {
+    const s = touchRef.current;
+    touchRef.current = null;
+    if (!s) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    // horizontal, decisive swipes only
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) next(); else prev();
+    }
+  }, [next, prev]);
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
@@ -112,8 +146,11 @@ export default function SemesterPreview() {
     <div
       className="fixed inset-0 z-[100] flex flex-col overflow-hidden select-none"
       style={{ background: `radial-gradient(120% 120% at 50% 0%, #012 0%, #001233 55%, #00060f 100%)`, color: TEXT }}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
     >
-      <div className="flex-1 min-h-0 px-10 pt-8 pb-4 flex flex-col">
+      {/* Padding/scroll differ only below md (phones): ≥768px is unchanged. */}
+      <div className="flex-1 min-h-0 px-4 pt-5 pb-24 md:px-10 md:pt-8 md:pb-4 flex flex-col overflow-y-auto md:overflow-hidden">
         <LayoutGroup>
           {step.kind === 'title' && SLIDES[0].render()}
           {step.kind === 'hub' && <Hub onEnter={enterUnit} />}
@@ -152,11 +189,42 @@ export default function SemesterPreview() {
               : `Unit ${UNIT_META[step.u].num} · ${step.s + 1} of 3`}
           </span>
         </div>
-        <div className="font-mono tracking-wide">
+        {/* Keyboard hints are meaningless on touch — hidden below md only. */}
+        <div className="font-mono tracking-wide hidden md:block">
           →/Space next · ← back · F fullscreen · N notes · Esc exit
         </div>
       </div>
+
+      {/* Touch controls: rendered only on coarse-pointer devices, so the desktop
+          DOM is completely unchanged. Keyboard nav still works everywhere. */}
+      {coarse && (
+        <TouchControls
+          i={i} n={n} onPrev={prev} onNext={next}
+          onNotes={() => setNotes((v) => !v)} onExit={exit}
+        />
+      )}
     </div>
+  );
+}
+
+/* ─────────────────────── touch controls (mobile only) ─────────────────────── */
+
+function TouchControls({ i, n, onPrev, onNext, onNotes, onExit }) {
+  const btn = 'flex items-center justify-center rounded-full font-mono text-sm active:scale-95 transition-transform';
+  const style = { background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(197,183,131,0.4)', color: GOLD, backdropFilter: 'blur(4px)' };
+  return (
+    <>
+      <button aria-label="Exit preview" onClick={onExit}
+        className={`absolute top-3 right-3 z-[110] w-10 h-10 text-lg ${btn}`} style={style}>✕</button>
+      <div className="absolute inset-x-0 bottom-14 z-[110] flex items-center justify-center gap-4 px-4">
+        <button aria-label="Previous slide" onClick={onPrev} disabled={i <= 0}
+          className={`w-14 h-14 text-2xl disabled:opacity-30 ${btn}`} style={style}>‹</button>
+        <button aria-label="Toggle speaker notes" onClick={onNotes}
+          className={`px-4 h-11 text-xs uppercase tracking-widest ${btn}`} style={style}>notes</button>
+        <button aria-label="Next slide" onClick={onNext} disabled={i >= n - 1}
+          className={`w-14 h-14 text-2xl disabled:opacity-30 ${btn}`} style={style}>›</button>
+      </div>
+    </>
   );
 }
 
@@ -272,15 +340,18 @@ function Video({ src, caption, posY }) {
 function ActFrame({ eyebrow, title, demo, aside, stat }) {
   return (
     <>
-      <header className="mb-4">
+      <header className="mb-3 md:mb-4">
         {eyebrow}
-        <h2 className="text-4xl font-bold mt-1" style={{ color: TEXT }}>{title}</h2>
+        <h2 className="text-2xl md:text-4xl font-bold mt-1" style={{ color: TEXT }}>{title}</h2>
       </header>
-      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
-        <div className="col-span-7 min-h-0 rounded-xl p-3" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      {/* Below md the 7/5 split stacks to a single column; ≥768px is unchanged.
+          The demo keeps a usable height when stacked (it can't rely on the flex
+          row height it gets in the desktop grid). */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6 flex-1 min-h-0">
+        <div className="md:col-span-7 min-h-[42vh] md:min-h-0 rounded-xl p-3" style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)' }}>
           {demo}
         </div>
-        <div className="col-span-5 min-h-0 flex flex-col gap-3">{aside}</div>
+        <div className="md:col-span-5 min-h-0 flex flex-col gap-3">{aside}</div>
       </div>
       {stat && (
         <div className="mt-4 text-center text-lg" style={{ color: MUTED }}>{stat}</div>
@@ -296,15 +367,15 @@ const SLIDES = [
   {
     render: () => (
       <div className="flex-1 flex flex-col items-center justify-center text-center">
-        <img src={`${import.meta.env.BASE_URL}usna-logo-small.png`} alt="USNA" className="h-24 mb-8 opacity-90" />
-        <div className="font-mono tracking-[0.35em] text-sm mb-4" style={{ color: GOLD }}>SP211 · GENERAL PHYSICS I</div>
-        <h1 className="text-6xl font-extrabold mb-4" style={{ color: TEXT }}>Semester Preview</h1>
-        <p className="text-2xl mb-10" style={{ color: MUTED }}>Four units. Fifteen weeks. One toolkit.</p>
-        <p className="max-w-2xl text-lg leading-relaxed" style={{ color: TEXT }}>
+        <img src={`${import.meta.env.BASE_URL}usna-logo-small.png`} alt="USNA" className="h-16 md:h-24 mb-6 md:mb-8 opacity-90" />
+        <div className="font-mono tracking-[0.35em] text-xs md:text-sm mb-3 md:mb-4" style={{ color: GOLD }}>SP211 · GENERAL PHYSICS I</div>
+        <h1 className="text-4xl md:text-6xl font-extrabold mb-3 md:mb-4" style={{ color: TEXT }}>Semester Preview</h1>
+        <p className="text-xl md:text-2xl mb-6 md:mb-10" style={{ color: MUTED }}>Four units. Fifteen weeks. One toolkit.</p>
+        <p className="max-w-2xl text-base md:text-lg leading-relaxed" style={{ color: TEXT }}>
           Everything you are about to see is on the syllabus. The homework teaches you to compute it,
           the labs let you measure it, and the simulations let you explore it.
         </p>
-        <div className="mt-12 font-mono text-sm animate-pulse" style={{ color: GOLD }}>press → to begin</div>
+        <div className="mt-8 md:mt-12 font-mono text-sm animate-pulse" style={{ color: GOLD }}>press → or swipe to begin</div>
       </div>
     ),
     notes: 'Say the meta-message out loud, then move into Unit I. Three minutes per unit is a ceiling, not a target.',
@@ -611,12 +682,12 @@ const SLIDES = [
   {
     render: () => (
       <div className="flex-1 flex flex-col items-center justify-center text-center">
-        <h2 className="text-5xl font-extrabold mb-6" style={{ color: TEXT }}>Four units. One toolkit.</h2>
-        <p className="max-w-3xl text-xl leading-relaxed mb-10" style={{ color: TEXT }}>
+        <h2 className="text-3xl md:text-5xl font-extrabold mb-4 md:mb-6" style={{ color: TEXT }}>Four units. One toolkit.</h2>
+        <p className="max-w-3xl text-lg md:text-xl leading-relaxed mb-6 md:mb-10" style={{ color: TEXT }}>
           Every one of these starts with <span style={{ color: GOLD }}>F = ma</span> or a
           <span style={{ color: GOLD }}> conservation law</span>, and by Friday you will have derived your first piece of it.
         </p>
-        <div className="grid grid-cols-4 gap-4 max-w-4xl w-full mb-10">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl w-full mb-8 md:mb-10">
           {[['I', 'Kinematics & Newton'], ['II', 'Energy & momentum'], ['III', 'Rotation & gravity'], ['IV', 'Waves']].map(([a, t]) => (
             <div key={a} className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(197,183,131,0.25)' }}>
               <div className="font-mono text-lg" style={{ color: GOLD }}>{a}</div>

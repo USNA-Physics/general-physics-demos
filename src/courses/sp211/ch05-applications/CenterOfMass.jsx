@@ -1119,8 +1119,10 @@ function getBody(key) {
 
 // Local retina canvas setup (mirrors @shared/lib/canvas setupCanvas so this file
 // stays self-contained; DPR-aware and re-callable on resize).
+// DPR capped at 2 (matches shared MAX_DPR): a no-op on desktop (dpr 1–2), but on
+// phones (dpr 3) it cuts per-frame fill cost so taps aren't starved by the loop.
 function setupCanvas2D(canvas, width, height) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.max(1, Math.round(width * dpr));
   canvas.height = Math.max(1, Math.round(height * dpr));
   canvas.style.width = width + 'px';

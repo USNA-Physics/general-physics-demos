@@ -1766,8 +1766,10 @@ function SliderLocal({ label, value, min, max, step, unit, onChange }) {
 
 // Local DPR-aware canvas setup (mirrors shared canvas.js; kept local so this
 // file has zero coupling to any shared canvas internals beyond the arrow prim).
+// DPR capped at 2 (matches shared MAX_DPR): a no-op on desktop (dpr 1–2), but on
+// phones (dpr 3) it cuts per-frame fill cost so taps aren't starved by the loop.
 function setupCanvasLocal(canvas, width, height) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.max(1, Math.round(width * dpr));
   canvas.height = Math.max(1, Math.round(height * dpr));
   canvas.style.width = width + 'px';
