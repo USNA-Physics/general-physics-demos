@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Touch: resolve taps immediately ─────────────────────────────────────────
+   By default, touch browsers wait after each tap to see whether a second tap
+   (double-tap-to-zoom) follows. When the main thread is busy — e.g. a demo is
+   playing its animation — that waiting window can swallow the first tap, so a
+   button or link needs a second tap to fire. This shows up page-wide while any
+   demo animates, including the app-switcher links above the demo.
+
+   `touch-action: manipulation` keeps scrolling/panning but drops double-tap
+   zoom, so a tap dispatches its click right away. It affects touch input only;
+   desktop mouse input ignores touch-action, so desktop behavior is unchanged. */
+button,
+a,
+label,
+summary,
+[role='button'] {
+  touch-action: manipulation;
+}
+
 /* ── Theme variables ─────────────────────────────────────────────────────── */
 
 :root {
