@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom';
 import { ThemeProvider } from './shared/ThemeContext';
 import App from './App';
 import PasswordGate from './shell/PasswordGate';
+import RouteAnalytics from './shell/RouteAnalytics';
 import { initAnalytics } from './analytics';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <HashRouter>
       <ThemeProvider>
         <PasswordGate>
+          <RouteAnalytics />
           <App />
         </PasswordGate>
       </ThemeProvider>
