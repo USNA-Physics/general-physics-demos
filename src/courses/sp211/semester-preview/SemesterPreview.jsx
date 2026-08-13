@@ -198,10 +198,7 @@ export default function SemesterPreview() {
       {/* Touch controls: rendered only on coarse-pointer devices, so the desktop
           DOM is completely unchanged. Keyboard nav still works everywhere. */}
       {coarse && (
-        <TouchControls
-          i={i} n={n} onPrev={prev} onNext={next}
-          onNotes={() => setNotes((v) => !v)} onExit={exit}
-        />
+        <TouchControls i={i} n={n} onPrev={prev} onNext={next} onExit={exit} />
       )}
     </div>
   );
@@ -209,18 +206,16 @@ export default function SemesterPreview() {
 
 /* ─────────────────────── touch controls (mobile only) ─────────────────────── */
 
-function TouchControls({ i, n, onPrev, onNext, onNotes, onExit }) {
-  const btn = 'flex items-center justify-center rounded-full font-mono text-sm active:scale-95 transition-transform';
+function TouchControls({ i, n, onPrev, onNext, onExit }) {
+  const btn = 'flex items-center justify-center rounded-full font-mono active:scale-95 transition-transform';
   const style = { background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(197,183,131,0.4)', color: GOLD, backdropFilter: 'blur(4px)' };
   return (
     <>
       <button aria-label="Exit preview" onClick={onExit}
         className={`absolute top-3 right-3 z-[110] w-10 h-10 text-lg ${btn}`} style={style}>✕</button>
-      <div className="absolute inset-x-0 bottom-14 z-[110] flex items-center justify-center gap-4 px-4">
+      <div className="absolute inset-x-0 bottom-14 z-[110] flex items-center justify-center gap-6 px-4">
         <button aria-label="Previous slide" onClick={onPrev} disabled={i <= 0}
           className={`w-14 h-14 text-2xl disabled:opacity-30 ${btn}`} style={style}>‹</button>
-        <button aria-label="Toggle speaker notes" onClick={onNotes}
-          className={`px-4 h-11 text-xs uppercase tracking-widest ${btn}`} style={style}>notes</button>
         <button aria-label="Next slide" onClick={onNext} disabled={i >= n - 1}
           className={`w-14 h-14 text-2xl disabled:opacity-30 ${btn}`} style={style}>›</button>
       </div>
@@ -277,13 +272,15 @@ function UnitView({ u, s }) {
     <motion.div
       layoutId={`unit-${u}`}
       transition={ZOOM}
-      className="flex-1 min-h-0 rounded-xl overflow-hidden"
+      /* Below md the box grows to its content so the page can scroll; ≥768px
+         keeps the fixed-height, clipped presentation layout. */
+      className="md:flex-1 md:min-h-0 rounded-xl overflow-visible md:overflow-hidden"
       style={{ border: '1px solid rgba(197,183,131,0.16)', background: 'rgba(0,0,0,0.22)' }}
     >
-      <div className="h-full px-8 pt-6 pb-5 flex flex-col">
+      <div className="md:h-full px-4 pt-4 pb-4 md:px-8 md:pt-6 md:pb-5 flex flex-col">
         <AnimatePresence mode="wait">
           <motion.div key={s} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                      transition={{ duration: 0.22 }} className="flex-1 min-h-0 flex flex-col">
+                      transition={{ duration: 0.22 }} className="md:flex-1 md:min-h-0 flex flex-col">
             {slide.render()}
           </motion.div>
         </AnimatePresence>
@@ -325,10 +322,12 @@ function Video({ src, caption, posY }) {
   // `posY` biases the object-cover crop vertically (e.g. '80%' keeps the bottom of
   // a tall clip in frame) so a landing/finish isn't trimmed off.
   return (
-    <figure className="flex flex-col gap-1 min-h-0">
+    <figure className="flex flex-col gap-1 md:min-h-0">
+      {/* Below md the clip has a fixed height (flex-1 collapses to 0 in the
+          unbounded, scrolling mobile column); ≥768px keeps flex sizing. */}
       <video
         src={`${MEDIA}${src}`}
-        className="w-full rounded-lg bg-black object-cover flex-1 min-h-0"
+        className="w-full rounded-lg bg-black object-cover h-44 md:h-auto md:flex-1 md:min-h-0"
         style={posY ? { objectPosition: `50% ${posY}` } : undefined}
         autoPlay muted loop playsInline controls preload="auto"
       />

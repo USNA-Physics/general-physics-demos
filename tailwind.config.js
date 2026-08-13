@@ -2,6 +2,14 @@
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   darkMode: 'class',
+  // Only apply hover: styles on devices that actually support hover. Without
+  // this, touch devices leave the :hover state "stuck" after a tap, so the first
+  // tap only hovers and a second tap is needed to activate a button/link. On
+  // desktop `@media (hover: hover)` is always true, so hover behavior is
+  // unchanged. (Opt-in in Tailwind 3.x; becomes the default in v4.)
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
   theme: {
     extend: {
       colors: {
