@@ -7,6 +7,7 @@ import IntensityPlot from '@shared/components/IntensityPlot';
 import DemoStub from '@shared/components/DemoStub';
 import { setupCanvas } from '@shared/lib/canvas';
 import { drawArrow } from '@shared/lib/vectorArrow';
+import { restyleLive, relayoutLive } from '@shared/lib/plotly';
 
 /**
  * FreeFall — vertical motion under gravity and its two extensions.
@@ -59,10 +60,7 @@ export default function FreeFall({ mode = 'default' }) {
 function FreeFallExplorer() {
   const [y0, setY0] = useState(DEFAULTS.y0);
   const [v0, setV0] = useState(DEFAULTS.v0);
-  const [scrub, setScrub] = useState(0);       // current time on the drop (s)
   const [playing, setPlaying] = useState(true);
-
-  const reset = () => { setY0(DEFAULTS.y0); setV0(DEFAULTS.v0); setScrub(0); setPlaying(true); };
 
   // Flight time: y0 + v0 t - 1/2 g t^2 = 0 (positive root).
   const disc = v0 * v0 + 2 * G * y0;
@@ -83,38 +81,63 @@ function FreeFallExplorer() {
 
   const apex = v0 > 0 ? y0 + (v0 * v0) / (2 * G) : y0;
   const yMax = Math.max(1, apex * 1.05);
-
-  // Keep the scrub inside the (possibly shortened) flight window.
-  useEffect(() => { setScrub((s) => Math.min(s, tGround)); }, [tGround]);
-  const scrubT = Math.min(scrub, tGround);
-  const idx = Math.max(0, Math.min(N - 1, Math.round((scrubT / tGround) * (N - 1))));
-  const now = { t: motion.t[idx], y: motion.y[idx], v: motion.v[idx], a: motion.a[idx] };
   const vImpact = v0 - G * tGround;
 
-  // Play: sweep the whole drop over ~2.5 s of wall clock, then loop.
-  const playRef = useRef();
-  useEffect(() => {
-    if (!playing) return;
-    const step = tGround / 50;
-    playRef.current = setInterval(() => {
-      setScrub((s) => (s >= tGround ? 0 : Math.min(tGround, s + step)));
-    }, 50);
-    return () => clearInterval(playRef.current);
-  }, [playing, tGround]);
+  const sampleAt = (sT) => {
+    const s = Math.max(0, Math.min(sT, tGround));
+    const idx = Math.max(0, Math.min(N - 1, Math.round((s / tGround) * (N - 1))));
+    return { t: motion.t[idx], y: motion.y[idx], v: motion.v[idx], a: motion.a[idx] };
+  };
 
-  // ── the animated drop (own canvas + rAF, reads live values via a ref) ──
+  // ── Animation runs OFF the React render cycle (see CONTRIBUTING.md →
+  //    "Animated demos"): one rAF loop advances the clock (a ref), draws the
+  //    canvas, moves the Plotly markers + time-line imperatively, and publishes
+  //    readouts to React only a few times a second. No per-frame re-render, so
+  //    Plotly is never re-laid-out during play — the reflow that dropped taps.
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
-  const st = useRef({ y0, v0, yMax, scrubT, tGround });
-  st.current = { y0, v0, yMax, scrubT, tGround };
+  const clockRef = useRef(0);                 // current time on the drop (s)
+  const gdRef = useRef(null);                 // Plotly graph div (imperative updates)
+  const playingRef = useRef(playing); playingRef.current = playing;
+  const physRef = useRef({ motion, tGround, yMax, y0, v0 });
+  physRef.current = { motion, tGround, yMax, y0, v0 };
+
+  // Live readouts + time-slider position, published from the loop (throttled).
+  const [live, setLive] = useState(() => ({ scrubT: 0, ...sampleAt(0) }));
+
+  const reset = () => {
+    setY0(DEFAULTS.y0); setV0(DEFAULTS.v0); setPlaying(true);
+    clockRef.current = 0; setLive({ scrubT: 0, ...sampleAt(0) });
+  };
+  // Manual scrub: pause and jump the clock; the loop reflects it next frame.
+  const scrubTo = (t) => {
+    setPlaying(false);
+    clockRef.current = Math.min(t, tGround);
+    setLive({ scrubT: clockRef.current, ...sampleAt(clockRef.current) });
+  };
+  // Keep the clock inside the (possibly shortened) flight window when it changes.
+  useEffect(() => { if (clockRef.current > tGround) clockRef.current = tGround; }, [tGround]);
 
   useEffect(() => {
     const canvas = canvasRef.current, wrap = wrapRef.current;
     if (!canvas || !wrap) return;
     let ctx, W, H, raf;
+    let last = null, lastPlot = 0, lastPub = 0;
+    const SWEEP = 2.5; // wall-clock seconds to sweep the whole drop, then loop
     const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
-    const draw = () => {
-      const { y0: yy, v0: vv, yMax: yM, scrubT: sT, tGround: tg } = st.current;
+    const draw = (ts) => {
+      const { motion: mo, tGround: tg, yMax: yM, y0: yy, v0: vv } = physRef.current;
+      // advance the play clock in real time (looping), off any React state
+      if (last == null) last = ts;
+      const dt = Math.min(0.05, (ts - last) / 1000); last = ts;
+      if (playingRef.current) {
+        let c = clockRef.current + dt * (tg / SWEEP);
+        if (c >= tg) c = 0;
+        clockRef.current = c;
+      }
+      const sT = Math.min(clockRef.current, tg);
+      const nIdx = Math.max(0, Math.min(mo.t.length - 1, Math.round((sT / tg) * (mo.t.length - 1))));
+      const now = { t: mo.t[nIdx], y: mo.y[nIdx], v: mo.v[nIdx], a: mo.a[nIdx] };
       const padBottom = 22, ballX = W / 2;
       const groundY = H - padBottom, topY = 16, span = groundY - topY;
       const yToPx = (yv) => groundY - (yv / yM) * span;
@@ -159,6 +182,16 @@ function FreeFallExplorer() {
       ctx.font = '10px JetBrains Mono, monospace'; ctx.fillStyle = MUTED;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillText('ground', ballX, groundY + 5);
+
+      // ── move the Plotly markers + time-line imperatively (no re-render) ──
+      if (ts - lastPlot > 32) {
+        lastPlot = ts;
+        restyleLive(gdRef.current, { x: [[now.t], [now.t], [now.t]], y: [[now.y], [now.v], [now.a]] }, [3, 4, 5]);
+        relayoutLive(gdRef.current, { 'shapes[0].x0': sT, 'shapes[0].x1': sT });
+      }
+      // ── publish readouts to React a few times a second (throttled) ──
+      if (ts - lastPub > 90) { lastPub = ts; setLive({ scrubT: sT, t: now.t, y: now.y, v: now.v, a: now.a }); }
+
       raf = requestAnimationFrame(draw);
     };
     resize();
@@ -168,31 +201,40 @@ function FreeFallExplorer() {
   }, []);
 
   // ── three stacked, time-synced panels: y (top), v (mid), a (bottom) ──
-  const line = (arr, yaxis, color) => ({
-    x: motion.t, y: arr, type: 'scatter', mode: 'lines', line: { color, width: 2.5 }, yaxis, hoverinfo: 'skip',
-  });
-  const dot = (val, yaxis, color) => ({
-    x: [now.t], y: [val], type: 'scatter', mode: 'markers',
-    marker: { color: '#FFFFFF', size: 8, line: { color, width: 2 } }, yaxis, hoverinfo: 'skip',
-  });
-  const panel = (domain, title, color, range) => ({
-    domain, anchor: 'x', title: { text: title, font: { color } },
-    zeroline: true, zerolinecolor: '#2A3442', tickfont: { size: 11 },
-    ...(range ? { range, autorange: false } : { range: undefined, autorange: true }),
-  });
-  const traces = [
-    line(motion.y, 'y3', GOLD), line(motion.v, 'y2', BLUE), line(motion.a, 'y', GREEN),
-    dot(now.y, 'y3', GOLD), dot(now.v, 'y2', BLUE), dot(now.a, 'y', GREEN),
-  ];
-  const layout = {
-    showlegend: false,
-    margin: { l: 54, r: 12, t: 8, b: 38 },
-    xaxis: { title: { text: 'Time (s)' }, anchor: 'y', domain: [0, 1], range: [0, tGround] },
-    yaxis: panel([0.0, 0.27], 'a (m/s²)', GREEN, [-(G + 2.5), 2]),
-    yaxis2: panel([0.37, 0.63], 'v (m/s)', BLUE, undefined),
-    yaxis3: panel([0.72, 1.0], 'y (m)', GOLD, [0, yMax]),
-    shapes: [{ type: 'line', xref: 'x', yref: 'paper', x0: scrubT, x1: scrubT, y0: 0, y1: 1, line: { color: 'rgba(240,236,227,0.5)', width: 1, dash: 'dot' } }],
-  };
+  // Rendered ONCE with static curves + marker traces (indices 3,4,5) and a time
+  // line (shapes[0]); the rAF loop above moves those imperatively. Memoized on
+  // the physics params so a readout re-render never hands react-plotly new
+  // objects (which would force a full relayout mid-tap). See CONTRIBUTING.md.
+  const staticTraces = useMemo(() => {
+    const line = (arr, yaxis, color) => ({
+      x: motion.t, y: arr, type: 'scatter', mode: 'lines', line: { color, width: 2.5 }, yaxis, hoverinfo: 'skip',
+    });
+    const dot = (val, yaxis, color) => ({
+      x: [motion.t[0]], y: [val], type: 'scatter', mode: 'markers',
+      marker: { color: '#FFFFFF', size: 8, line: { color, width: 2 } }, yaxis, hoverinfo: 'skip',
+    });
+    return [
+      line(motion.y, 'y3', GOLD), line(motion.v, 'y2', BLUE), line(motion.a, 'y', GREEN),
+      dot(motion.y[0], 'y3', GOLD), dot(motion.v[0], 'y2', BLUE), dot(motion.a[0], 'y', GREEN),
+    ];
+  }, [motion]);
+
+  const staticLayout = useMemo(() => {
+    const panel = (domain, title, color, range) => ({
+      domain, anchor: 'x', title: { text: title, font: { color } },
+      zeroline: true, zerolinecolor: '#2A3442', tickfont: { size: 11 },
+      ...(range ? { range, autorange: false } : { range: undefined, autorange: true }),
+    });
+    return {
+      showlegend: false,
+      margin: { l: 54, r: 12, t: 8, b: 38 },
+      xaxis: { title: { text: 'Time (s)' }, anchor: 'y', domain: [0, 1], range: [0, tGround] },
+      yaxis: panel([0.0, 0.27], 'a (m/s²)', GREEN, [-(G + 2.5), 2]),
+      yaxis2: panel([0.37, 0.63], 'v (m/s)', BLUE, undefined),
+      yaxis3: panel([0.72, 1.0], 'y (m)', GOLD, [0, yMax]),
+      shapes: [{ type: 'line', xref: 'x', yref: 'paper', x0: 0, x1: 0, y0: 0, y1: 1, line: { color: 'rgba(240,236,227,0.5)', width: 1, dash: 'dot' } }],
+    };
+  }, [motion, tGround, yMax]);
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
@@ -208,17 +250,17 @@ function FreeFallExplorer() {
             </button>
             <span className="text-usna-muted text-xs">play / scrub</span>
           </div>
-          <Slider label="Time (t)" value={Number(scrubT.toFixed(2))} min={0} max={Number(tGround.toFixed(2))} step={0.01} unit="s"
-                  onChange={(v) => { setPlaying(false); setScrub(v); }} />
+          <Slider label="Time (t)" value={Number(live.scrubT.toFixed(2))} min={0} max={Number(tGround.toFixed(2))} step={0.01} unit="s"
+                  onChange={scrubTo} />
         </div>
 
         <div className="mt-2 border-t border-usna-grid pt-3">
           <Readout label="Time to ground" value={tGround.toFixed(2)} unit="s" />
           <Readout label="Impact speed" value={Math.abs(vImpact).toFixed(1)} unit="m/s" />
           <div className="mt-2 pt-2 border-t border-usna-grid">
-            <Readout label="height y" value={now.y.toFixed(1)} unit="m" />
-            <Readout label="velocity v" value={now.v.toFixed(1)} unit="m/s" />
-            <Readout label="accel a" value={now.a.toFixed(2)} unit="m/s²" />
+            <Readout label="height y" value={live.y.toFixed(1)} unit="m" />
+            <Readout label="velocity v" value={live.v.toFixed(1)} unit="m/s" />
+            <Readout label="accel a" value={live.a.toFixed(2)} unit="m/s²" />
           </div>
         </div>
       </ControlPanel>
@@ -229,7 +271,8 @@ function FreeFallExplorer() {
             <canvas ref={canvasRef} className="block" />
           </div>
           <div className="flex-1 min-w-0 bg-usna-card border border-usna-grid rounded-lg p-3 overflow-hidden">
-            <IntensityPlot traces={traces} layoutOverrides={layout} />
+            <IntensityPlot traces={staticTraces} layoutOverrides={staticLayout}
+                           onReady={(gd) => { gdRef.current = gd; }} />
           </div>
         </div>
 

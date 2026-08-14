@@ -1,7 +1,25 @@
 /**
  * plotly.js — Shared Plotly layout, config, and trace helpers.
  */
+import Plotly from 'plotly.js-basic-dist-min';
 import { wavelengthToRGB } from './color';
+
+/**
+ * Imperative, per-frame chart updates for animated demos.
+ *
+ * Animating by handing react-plotly new `data`/`layout` objects each frame forces
+ * a full `Plotly.react()` relayout ~20x/sec, which thrashes layout and (on mobile)
+ * drops taps. Instead, render <Plot> once with static curves and move the live
+ * marker(s)/time-line with these — they touch only the named attributes and don't
+ * recompute the layout. `gd` is the graph div from IntensityPlot's `onReady`.
+ * See CONTRIBUTING.md → "Animating charts (Plotly)".
+ */
+export function restyleLive(gd, update, traceIndices) {
+  if (gd && gd.data) Plotly.restyle(gd, update, traceIndices);
+}
+export function relayoutLive(gd, update) {
+  if (gd && gd.layout) Plotly.relayout(gd, update);
+}
 
 const darkLayout = {
   paper_bgcolor: '#0D1321',

@@ -19,6 +19,9 @@ const SWALLOW_MS = 700; // window to suppress the browser's trailing click
 
 export function installTapFix() {
   if (typeof window === 'undefined' || !window.PointerEvent) return;
+  // Escape hatch for verifying the native fix on a migrated demo: `?noshim=1`
+  // (before the #) disables this so you can confirm taps work without it.
+  if (new URLSearchParams(window.location.search).get('noshim') === '1') return;
 
   let downId = null, downX = 0, downY = 0;
   let dispatching = false;      // true only while WE dispatch the synthetic click
