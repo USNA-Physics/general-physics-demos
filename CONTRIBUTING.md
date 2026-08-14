@@ -53,6 +53,19 @@ compare on `data`/`layout`: **if you hand it new objects, it runs a full
 `Plotly.react()` relayout.** Rebuilding `traces`/`layout` every render (e.g. to
 move a marker) therefore re-lays-out the whole chart at frame rate. Don't.
 
+**`IntensityPlot` is NOT deprecated — use it for every Plotly chart.** It carries
+the USNA theme defaults and the touch-safety deferral, so it's the supported way
+to render Plotly here. What *is* deprecated is the anti-pattern below.
+
+> ⛔ **Deprecated pattern — do not use:** animating a chart by re-rendering it
+> (rebuilding `traces`/`layout` each render, or driving the chart off React state
+> at frame rate). It forces a full `Plotly.react()` per frame, burns CPU, and —
+> before `IntensityPlot` started deferring during touch — dropped taps on mobile.
+> `IntensityPlot`'s deferral is a safety net, not a licence to re-render at frame
+> rate. Use the imperative path below instead, and for a *continuously* moving
+> visual prefer a canvas (like `ShmExplorer`) with Plotly only for the static
+> reference curves.
+
 Instead — matching react-plotly's own guidance (use `revision`/immutable data, or
 a ref to call low-level Plotly APIs):
 
@@ -89,10 +102,12 @@ that follow the ref/rAF pattern don't re-render, so they're immune; the Plotly
 demos hit it because they animated through React state. Keeping animation off the
 render cycle fixes it at the source.
 
-> Historical note: a global `src/shell/tapFix.js` shim (activate on `pointerup`
-> for touch) was added as a stopgap while demos were migrated to this pattern.
-> Once every animated Plotly demo uses the pattern above, that shim is removed.
-> `?noshim=1` in the URL disables it for on-device verification.
+> How the fix actually lands: `@shared/lib/touchActivity` tracks whether a touch
+> is in flight, and both Plotly update paths consult it — `IntensityPlot` defers
+> its `Plotly.react()` and `restyleLive`/`relayoutLive` skip their imperative
+> repaint — for ~450ms around a tap. (A global `pointerup` shim, `tapFix.js`, was
+> used as a stopgap during diagnosis and has since been removed now that the fix
+> lives in the shared chart layer.)
 
 ## Desktop must not regress
 
