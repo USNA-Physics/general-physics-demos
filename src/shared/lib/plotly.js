@@ -3,6 +3,7 @@
  */
 import Plotly from 'plotly.js-basic-dist-min';
 import { wavelengthToRGB } from './color';
+import { touchBusy } from './touchActivity';
 
 /**
  * Imperative, per-frame chart updates for animated demos.
@@ -14,11 +15,15 @@ import { wavelengthToRGB } from './color';
  * recompute the layout. `gd` is the graph div from IntensityPlot's `onReady`.
  * See CONTRIBUTING.md → "Animating charts (Plotly)".
  */
+// While a touch is in flight we skip the repaint so it can't drop the tap's
+// click; the next animation frame after the touch settles catches the chart up.
 export function restyleLive(gd, update, traceIndices) {
-  if (gd && gd.data) Plotly.restyle(gd, update, traceIndices);
+  if (touchBusy() || !gd || !gd.data) return;
+  Plotly.restyle(gd, update, traceIndices);
 }
 export function relayoutLive(gd, update) {
-  if (gd && gd.layout) Plotly.relayout(gd, update);
+  if (touchBusy() || !gd || !gd.layout) return;
+  Plotly.relayout(gd, update);
 }
 
 const darkLayout = {
