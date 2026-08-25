@@ -11,9 +11,13 @@ import { setupCanvas } from '@shared/lib/canvas';
  *
  * A boat drives across a river of width W at a constant velocity RELATIVE TO THE
  * WATER (speed + heading), while the water itself moves downstream at the
- * current velocity. The boat's velocity over the GROUND is the vector sum
+ * current velocity. The boat's velocity over the LAND is the vector sum
  *
- *     v_bg = v_bw + v_wg           (boat/ground = boat/water + water/ground)
+ *     v_BL = v_BW + v_WL           (boat/land = boat/water + water/land)
+ *
+ * Subscripts follow the L5 convention: object first, frame second, with the
+ * bodies boat (B), water (W), land (L). Internal JS vars keep short names
+ * (bw, wg, bg) but every student-visible label reads v_BW, v_WL, v_BL.
  *
  * which is exactly the Galilean velocity-addition rule. Everything the student
  * sees — the tip-to-tail arrow triangle, the animated crossing, the ground track,
@@ -40,12 +44,12 @@ import { setupCanvas } from '@shared/lib/canvas';
  *       Previously the streaks scrolled in both frames, contradicting the idea.
  *  WOW  A "Split" view renders the ground frame and water frame side by side
  *       simultaneously — same motion, two observers, seen at once.
- *  INT  Drag the blue v_bw arrow tip directly on the canvas to rotate the
+ *  INT  Drag the blue v_BW arrow tip directly on the canvas to rotate the
  *       heading; the velocity triangle reforms live.
  *  PHY  "Fastest crossing" preset (heading 90°) — quickest across even though
  *       you miss the dock — contrasted with the crab "hit the dock" solution.
  *  CUST River width is a slider; drift scales with the resulting crossing time.
- *  EXPL A live component-equation overlay shows v_bg = v_bw + v_wg with the
+ *  EXPL A live component-equation overlay shows v_BL = v_BW + v_WL with the
  *       current numbers plugged in, per axis.
  */
 
@@ -248,7 +252,7 @@ export default function RelativeMotion({ mode = 'default' }) {
         : (Math.abs(s.bg.y) > 1e-6 ? riverWm / Math.abs(s.bg.y) : 10);
 
       // Galilean frame shift: the water frame subtracts the water's displacement,
-      // so every ground-fixed feature slides by −v_wg·t.
+      // so every ground-fixed feature slides by −v_WL·t.
       const shiftAt = (tt) => (frame === 'water'
         ? { x: -s.wg.x * tt, y: -s.wg.y * tt }
         : { x: 0, y: 0 });
@@ -436,14 +440,14 @@ export default function RelativeMotion({ mode = 'default' }) {
 
       // ---- live velocity triangle, tip-to-tail, anchored at the boat ----
       const vScale = 14; // px per (m/s)
-      const a1 = { dx: s.bw.x * vScale, dy: -s.bw.y * vScale };  // boat/water (blue)
-      const a2 = { dx: s.wg.x * vScale, dy: -s.wg.y * vScale };  // current (green), tip-to-tail
-      const res = resultant([a1, a2]);                           // boat/ground (track)
-      drawArrow(ctx, { x: boatX, y: boatY, dx: a1.dx, dy: a1.dy, color: BLUE, width: 3, label: 'v_bw' });
-      drawArrow(ctx, { x: boatX + a1.dx, y: boatY + a1.dy, dx: a2.dx, dy: a2.dy, color: CURRENT, width: 3, label: 'v_wg' });
-      drawArrow(ctx, { x: boatX, y: boatY, dx: res.dx, dy: res.dy, color: TRACK, width: 3.5, label: 'v_bg' });
+      const a1 = { dx: s.bw.x * vScale, dy: -s.bw.y * vScale };  // v_BW boat/water (blue)
+      const a2 = { dx: s.wg.x * vScale, dy: -s.wg.y * vScale };  // v_WL current, water/land (green), tip-to-tail
+      const res = resultant([a1, a2]);                           // v_BL boat/land (track)
+      drawArrow(ctx, { x: boatX, y: boatY, dx: a1.dx, dy: a1.dy, color: BLUE, width: 3, label: 'v_BW' });
+      drawArrow(ctx, { x: boatX + a1.dx, y: boatY + a1.dy, dx: a2.dx, dy: a2.dy, color: CURRENT, width: 3, label: 'v_WL' });
+      drawArrow(ctx, { x: boatX, y: boatY, dx: res.dx, dy: res.dy, color: TRACK, width: 3.5, label: 'v_BL' });
 
-      // ---- drag handle on the v_bw tip (interactive pane only) ----
+      // ---- drag handle on the v_BW tip (interactive pane only) ----
       const tipX = boatX + a1.dx, tipY = boatY + a1.dy;
       if (interactive) {
         ctx.beginPath();
@@ -509,7 +513,7 @@ export default function RelativeMotion({ mode = 'default' }) {
       ctx.fillStyle = MUTED;
       ctx.fillText(
         frame === 'ground'
-          ? 'Ground frame: banks fixed, boat crabs across'
+          ? 'Land frame: banks fixed, boat crabs across'
           : 'Water frame: water at rest, banks drift',
         x0 + mL + 4, mT + 2,
       );
@@ -587,7 +591,7 @@ export default function RelativeMotion({ mode = 'default' }) {
       raf = requestAnimationFrame(draw);
     };
 
-    // ── pointer drag: grab the v_bw tip and rotate the heading ──────────────
+    // ── pointer drag: grab the v_BW tip and rotate the heading ──────────────
     const pointFromEvent = (e) => {
       const rect = canvas.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -611,7 +615,7 @@ export default function RelativeMotion({ mode = 'default' }) {
       const h = hitRef.current;
       if (!h) return;
       const pt = pointFromEvent(e);
-      // grab if the press lands near the v_bw tip handle
+      // grab if the press lands near the v_BW tip handle
       const grabR = 22;
       if (Math.hypot(pt.x - h.tipX, pt.y - h.tipY) <= grabR) {
         draggingRef.current = true;
@@ -676,7 +680,7 @@ export default function RelativeMotion({ mode = 'default' }) {
           <div className="text-usna-text text-sm font-medium mb-2">Observer view</div>
           <div className="grid grid-cols-3 gap-1.5">
             {[
-              ['ground', 'Ground'],
+              ['ground', 'Land'],
               ['water', 'Water'],
               ['split', 'Split'],
             ].map(([key, label]) => (
@@ -723,12 +727,12 @@ export default function RelativeMotion({ mode = 'default' }) {
           <div className="text-usna-text text-sm font-medium mb-2">Boat (relative to water)</div>
           <Slider label="Boat speed" value={boatSpeed} min={0.5} max={8} step={0.1} unit="m/s" onChange={setBoatSpeed} />
           <Slider label="Heading" value={Number(heading.toFixed(0))} min={20} max={160} step={1} unit="° from downstream" onChange={setHeading} />
-          <p className="text-usna-muted text-xs -mt-1">Tip: drag the blue v_bw arrow tip on the canvas to steer.</p>
+          <p className="text-usna-muted text-xs -mt-1">Tip: drag the blue v_BW arrow tip on the canvas to steer.</p>
         </div>
 
         {/* Current controls */}
         <div className="border-t border-usna-grid pt-3">
-          <div className="text-usna-text text-sm font-medium mb-2">Current (water over ground)</div>
+          <div className="text-usna-text text-sm font-medium mb-2">Current (water over land)</div>
           <Slider label="Current speed" value={current} min={0} max={6} step={0.1} unit="m/s" onChange={setCurrent} />
           <Slider label="Current direction" value={Number(currentDir.toFixed(0))} min={-40} max={40} step={1} unit="° from downstream" onChange={setCurrentDir} />
         </div>
@@ -775,7 +779,7 @@ export default function RelativeMotion({ mode = 'default' }) {
           {/* EXPLAIN: live component-equation overlay, numbers plugged in per axis */}
           <div className="absolute top-2 right-3 text-[11px] font-mono leading-tight text-right bg-usna-navy/70 rounded px-2 py-1.5 pointer-events-none">
             <div className="text-usna-text/90 mb-0.5">
-              <span style={{ color: TRACK }}>v_bg</span> = <span style={{ color: BLUE }}>v_bw</span> + <span style={{ color: CURRENT }}>v_wg</span>
+              <span style={{ color: TRACK }}>v_BL</span> = <span style={{ color: BLUE }}>v_BW</span> + <span style={{ color: CURRENT }}>v_WL</span>
             </div>
             <div>
               <span style={{ color: MUTED }}>x:</span>{' '}
@@ -794,9 +798,9 @@ export default function RelativeMotion({ mode = 'default' }) {
 
           {/* legend chips */}
           <div className="absolute bottom-2 right-3 text-[11px] font-mono space-y-0.5 text-right pointer-events-none">
-            <div style={{ color: BLUE }}>v_bw: boat through water</div>
-            <div style={{ color: CURRENT }}>v_wg: current</div>
-            <div style={{ color: TRACK }}>v_bg: track over ground</div>
+            <div style={{ color: BLUE }}>v_BW: boat through water</div>
+            <div style={{ color: CURRENT }}>v_WL: current (water over land)</div>
+            <div style={{ color: TRACK }}>v_BL: track over the land</div>
           </div>
           {/* crossing progress */}
           <div className="absolute bottom-2 left-3 w-40 h-1.5 rounded bg-usna-deep overflow-hidden">
@@ -813,6 +817,6 @@ export default function RelativeMotion({ mode = 'default' }) {
 const INFO = {
   title: 'Relative motion is vector addition',
   description:
-    'The boat\'s velocity over the ground is the vector sum of its velocity through the water and the water\'s velocity over the ground. Aiming straight across (90 degrees) still lands the boat downstream, because the current contributes a cross-stream component. That is the "fastest crossing" preset: it reaches the far bank in the least time but misses the dock. Landing on the dock requires crabbing upstream until the boat\'s upstream component cancels the current, at the cost of a longer crossing. The observer view is the central idea. In the ground frame the banks are fixed, the boat crabs diagonally, and the current flows past. In the water frame the water is at rest, the boat runs straight along its heading, and the shoreline drifts upstream. The split view shows both frames at once. The same geometry governs apparent (ship-relative) wind and an underway replenishment approach, where a supply ship matches the receiving ship\'s course and speed so the two vessels appear motionless relative to each other while both make way over the ground.',
-  equation: String.raw`\vec v_{bg} = \vec v_{bw} + \vec v_{wg}`,
+    'The boat\'s velocity over the land (its course over ground) is the vector sum of its velocity through the water and the water\'s velocity over the land. Aiming straight across (90 degrees) still lands the boat downstream, because the current contributes a cross-stream component. That is the "fastest crossing" preset: it reaches the far bank in the least time but misses the dock. Landing on the dock requires crabbing upstream until the boat\'s upstream component cancels the current, at the cost of a longer crossing. The observer view is the central idea. In the land frame the banks are fixed, the boat crabs diagonally, and the current flows past. In the water frame the water is at rest, the boat runs straight along its heading, and the shoreline drifts upstream. The split view shows both frames at once. The subscripts follow the object-first, frame-second convention, with bodies boat (B), water (W), land (L). The same geometry governs apparent (ship-relative) wind and an underway replenishment approach, where a supply ship matches the receiving ship\'s course and speed so the two vessels appear motionless relative to each other while both make way over the ground.',
+  equation: String.raw`\vec v_{BL} = \vec v_{BW} + \vec v_{WL}`,
 };
