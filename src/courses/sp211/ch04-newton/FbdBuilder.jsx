@@ -101,6 +101,38 @@ function angleDiff(a, b) {
   return d > 180 ? 360 - d : d;
 }
 
+// Spread the ORIGINS of forces that point in nearly the same direction so their
+// shafts don't draw on top of one another. Two down-arrows from one body center
+// (e.g. the top block's weight and the block above pushing down) would otherwise
+// be perfectly coincident; here they get pushed onto parallel "lanes"
+// perpendicular to their shared direction, still anchored at the body center.
+//
+// Collinear-OPPOSITE forces (weight↓ / normal↑) are left sharing the center —
+// they already extend opposite ways and read as one axis, the textbook look.
+// Returns an array of {ox, oy} canvas-px origin offsets, one per input angle.
+function laneOffsets(angles, spacing = 18) {
+  const n = angles.length;
+  const offs = angles.map(() => ({ ox: 0, oy: 0 }));
+  const used = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    if (used[i]) continue;
+    const group = [i];
+    used[i] = true;
+    for (let j = i + 1; j < n; j++) {
+      if (!used[j] && angleDiff(angles[i], angles[j]) <= 12) { group.push(j); used[j] = true; }
+    }
+    if (group.length < 2) continue; // nothing to separate
+    // perpendicular to the group direction, in screen coords (+y down)
+    const a = (angles[i] * Math.PI) / 180;
+    const px = Math.sin(a), py = Math.cos(a); // ⟂ to (cos a, −sin a)
+    group.forEach((idx, k) => {
+      const t = (k - (group.length - 1) / 2) * spacing;
+      offs[idx] = { ox: px * t, oy: py * t };
+    });
+  }
+  return offs;
+}
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* scene library                                                               */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -197,9 +229,13 @@ const SCENES = {
     surfaceAngle: 0,
     inclineAdjustable: false,
     target: 'cart',
+    // Horse LEADS on the right (motion is to the right, "forward" = +x): the rope
+    // then pulls the cart forward (toward the horse, +x) and the ground pushes the
+    // horse forward (+x), matching every force angle and label below. With the
+    // horse on the left these tensions would point away from the rope.
     bodies: {
-      horse: { label: 'Horse', kind: 'horse', x: 0.34, y: 0.52, w: 0.22, h: 0.22 },
-      cart: { label: 'Cart', kind: 'cart', x: 0.66, y: 0.55, w: 0.22, h: 0.16 },
+      horse: { label: 'Horse', kind: 'horse', x: 0.66, y: 0.52, w: 0.22, h: 0.22 },
+      cart: { label: 'Cart', kind: 'cart', x: 0.34, y: 0.55, w: 0.22, h: 0.16 },
     },
     // fbd target = cart at constant velocity: T forward balances f backward,
     // N balances W → the cart's own FBD closes (Newton's first law).
@@ -228,10 +264,13 @@ const PAIR_SCENES = {
   table: {
     // Only the contact pair is a true 3rd-law pair. Weight's partner (Earth) is
     // off-screen, so we note it in text rather than drawing a partner arrow.
+    // The weight sits at the block's center; the contact pair (N up on block,
+    // N′ down on table) is nudged to one side so it forms its own column instead
+    // of drawing straight down the same line as the weight.
     forces: [
       { id: 'W', body: 'block', type: 'weight', angle: -90, label: 'W: Earth pulls block' },
-      { id: 'N_on_block', body: 'block', type: 'normal', angle: 90, label: 'N: table pushes block' },
-      { id: 'N_on_table', body: 'table', type: 'applied', angle: -90, label: "N′: block pushes table" },
+      { id: 'N_on_block', body: 'block', type: 'normal', angle: 90, nudgeX: 34, label: 'N: table pushes block' },
+      { id: 'N_on_table', body: 'table', type: 'applied', angle: -90, nudgeX: 34, label: "N′: block pushes table" },
     ],
     partners: { N_on_block: 'N_on_table', N_on_table: 'N_on_block' },
     // y chosen so the slab's TOP meets the block's base (block y 0.52 + h/2 0.08 = 0.60).
@@ -459,11 +498,14 @@ function drawScenery(ctx, scene, bodies, W, H, opts = {}) {
   if (bodies.horse && bodies.cart) {
     const hb = bodyRect(bodies.horse, W, H, theta);
     const cb = bodyRect(bodies.cart, W, H, theta);
+    // rope spans the two FACING edges, whichever side each body is on
+    const horseEdge = hb.cx < cb.cx ? hb.cx + hb.hw : hb.cx - hb.hw;
+    const cartEdge = cb.cx < hb.cx ? cb.cx + cb.hw : cb.cx - cb.hw;
     ctx.strokeStyle = 'rgba(197,183,131,0.7)';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(hb.cx + hb.hw, hb.cy + hb.hh * 0.3);
-    ctx.lineTo(cb.cx - cb.hw, cb.cy);
+    ctx.moveTo(horseEdge, hb.cy + hb.hh * 0.3);
+    ctx.lineTo(cartEdge, cb.cy);
     ctx.stroke();
   }
 
@@ -763,13 +805,19 @@ function FbdMode() {
       if (polygonRef.current) {
         drawForcePolygon(ctx, list, W, H, net);
       } else {
-        // draw each placed force from the body center
-        for (const f of list) {
+        // Spread same-direction forces onto parallel lanes so duplicates a
+        // student stacks (e.g. two down-forces) don't coincide. Offsets are zero
+        // for the usual one-per-direction diagram, so normal use is untouched.
+        const laneOff = laneOffsets(list.map((f) => f.angle));
+        // draw each placed force from the body center (nudged onto its lane)
+        for (let k = 0; k < list.length; k++) {
+          const f = list[k];
           const t = FORCE_TYPES[f.type];
           const { dx, dy } = polar(f.angle, f.mag);
+          const ox = r.cx + laneOff[k].ox, oy = r.cy + laneOff[k].oy;
           const isSel = selRef.current === f.uid;
           drawArrow(ctx, {
-            x: r.cx, y: r.cy, dx, dy,
+            x: ox, y: oy, dx, dy,
             color: t.color, width: isSel ? 5 : 3.5,
             label: `${t.sym}`, head: 12,
           });
@@ -779,13 +827,13 @@ function FbdMode() {
           ctx.strokeStyle = t.color;
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(r.cx + dx, r.cy + dy, isSel ? 7 : 5, 0, 2 * Math.PI);
+          ctx.arc(ox + dx, oy + dy, isSel ? 7 : 5, 0, 2 * Math.PI);
           ctx.fill();
           ctx.stroke();
           ctx.restore();
           // on-canvas delete handle (× above-right of the selected tip)
           if (isSel) {
-            const hx = r.cx + dx + 16, hy = r.cy + dy - 16;
+            const hx = ox + dx + 16, hy = oy + dy - 16;
             ctx.save();
             ctx.fillStyle = '#3A2530';
             ctx.strokeStyle = '#E86A5C';
@@ -860,13 +908,15 @@ function FbdMode() {
       const r = { cx: rBase.cx + d.x, cy: rBase.cy + d.y };
       const p = localPt(ev);
       const list = forcesRef.current;
+      const laneOff = laneOffsets(list.map((x) => x.angle)); // match the draw lanes
       // (0) delete handle on the currently-selected force's tip
       const selUid = selRef.current;
       if (selUid != null) {
-        const sf = list.find((x) => x.uid === selUid);
-        if (sf) {
+        const si = list.findIndex((x) => x.uid === selUid);
+        if (si >= 0) {
+          const sf = list[si];
           const { dx, dy } = polar(sf.angle, sf.mag);
-          const hx = r.cx + dx + 16, hy = r.cy + dy - 16;
+          const hx = r.cx + laneOff[si].ox + dx + 16, hy = r.cy + laneOff[si].oy + dy - 16;
           if (Math.hypot(p.x - hx, p.y - hy) < 12) {
             setForces((f) => f.filter((x) => x.uid !== selUid));
             setSelected(null);
@@ -880,7 +930,7 @@ function FbdMode() {
       for (let i = list.length - 1; i >= 0; i--) {
         const f = list[i];
         const { dx, dy } = polar(f.angle, f.mag);
-        const tx = r.cx + dx, ty = r.cy + dy;
+        const tx = r.cx + laneOff[i].ox + dx, ty = r.cy + laneOff[i].oy + dy;
         if (Math.hypot(p.x - tx, p.y - ty) < 16) {
           setSelected(f.uid);
           dragRef.current = { kind: 'tip', uid: f.uid };
@@ -1417,13 +1467,35 @@ function PairsMode() {
 
   useEffect(() => { setSelected(null); }, [sceneKey]);
 
-  // Where does each force attach? For most forces it emanates from the body
-  // center; render offsets keep multiple forces on one body legible.
+  // Per-force origin offset (canvas px): forces on the SAME body pointing the
+  // same way get spread onto parallel lanes so they don't coincide (the stacked-
+  // blocks scene draws A's weight and B-pushing-down-on-A both straight down).
+  // Static per scene, so memoize on the pair.
+  const originOffsets = useMemo(() => {
+    const map = {};
+    const byBody = {};
+    for (const f of pair.forces) (byBody[f.body] ||= []).push(f);
+    for (const list of Object.values(byBody)) {
+      const offs = laneOffsets(list.map((x) => x.angle));
+      list.forEach((f, k) => { map[f.id] = { ...offs[k] }; });
+    }
+    // hand-tuned lateral nudges (px) to break cross-body stacks the automatic
+    // per-body lanes can't see (e.g. the block's weight vs the table's N′).
+    for (const f of pair.forces) {
+      if (f.nudgeX) map[f.id].ox += f.nudgeX;
+      if (f.nudgeY) map[f.id].oy += f.nudgeY;
+    }
+    return map;
+  }, [pair]);
+
+  // Where does each force attach? Body center, nudged onto its lane so parallel
+  // forces on one body stay legible.
   const forceOrigin = useCallback((f, W, H) => {
     const b = bodies[f.body];
     const r = bodyRect(b, W, H, theta);
-    return { x: r.cx, y: r.cy };
-  }, [bodies, theta]);
+    const off = originOffsets[f.id] || { ox: 0, oy: 0 };
+    return { x: r.cx + off.ox, y: r.cy + off.oy };
+  }, [bodies, theta, originOffsets]);
 
   // Fit transform (scale + translate) so the whole scene stays in frame.
   const fitRef = useRef({ s: 1, tx: 0, ty: 0 });
@@ -1604,9 +1676,11 @@ function PairsMode() {
         const f = pair.forces[i];
         const b = bodies[f.body];
         const r = bodyRect(b, W, H, theta);
+        const off = originOffsets[f.id] || { ox: 0, oy: 0 };
+        const ox = r.cx + off.ox, oy = r.cy + off.oy;
         const { dx, dy } = polar(f.angle, 92);
-        // distance from point to the arrow segment
-        if (distToSegment(px, py, r.cx, r.cy, r.cx + dx, r.cy + dy) < 12) {
+        // distance from point to the arrow segment (offset onto its lane)
+        if (distToSegment(px, py, ox, oy, ox + dx, oy + dy) < 12) {
           setSelected((s) => (s === f.id ? null : f.id));
           ev.preventDefault();
           return;
@@ -1617,7 +1691,7 @@ function PairsMode() {
 
     canvas.addEventListener('pointerdown', onDown);
     return () => canvas.removeEventListener('pointerdown', onDown);
-  }, [pair, bodies]);
+  }, [pair, bodies, originOffsets, theta]);
 
   const selForce = pair.forces.find((f) => f.id === selected);
   const partnerId = selected ? pair.partners[selected] : null;
