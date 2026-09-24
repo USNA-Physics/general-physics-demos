@@ -94,9 +94,7 @@ Deploy. GitHub Actions runs `npm ci` and `npm run build` on each push to `main`
 and publishes `dist/` to GitHub Pages over HTTPS. Video and audio live in
 `public/media/` as regular files served from the same origin.
 
-Access and analytics. A client-side password screen (`src/shell/PasswordGate.jsx`)
-compares a SHA-256 hash and stores the unlock in `localStorage`; it is a deterrent
-rather than real security, since static assets remain reachable. Google Analytics
+Analytics. The site is public — no access gate. Google Analytics
 4 (`src/analytics.js`) stays disabled unless a `VITE_GA_ID` build variable is set.
 
 ## Tech stack

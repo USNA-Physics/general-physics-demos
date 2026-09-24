@@ -83,7 +83,6 @@ _(All routes are under `/#/sp211/`.)_
 ## Deployment
 - **Live:** https://usna-physics.github.io/general-physics-demos/ (GitHub Pages, public repo).
 - **CI:** `.github/workflows/deploy.yml` builds + deploys on every push to `main` (Pages source = GitHub Actions).
-- **Access gate:** a lightweight client-side password screen (`src/shell/PasswordGate.jsx`) — shared class password, hash-stored, remembered in localStorage. Not real security (static hosting), just keeps casual passers-by out.
 - **Analytics:** GA4 plumbing wired (`src/analytics.js`, env-driven). Inactive until a `VITE_GA_ID` Actions repo variable is set — see below.
 
 ## Pending
