@@ -267,6 +267,16 @@ const courses = [
             ],
             component: lazy(() => import('./courses/sp211/ch08-momentum/CollisionSandbox')),
           },
+          {
+            slug: 'setup',
+            dLabel: 'D22b',
+            title: 'Collision Setup Framer',
+            description: 'A setup trainer, not a solver. Pick the positive direction, the system membership, and the collision type; get a live conservation verdict and the assembled symbolic equations — then it refuses to compute the answer, so the drill is the setup itself.',
+            moment: 'Leave one colliding cart out of the system and the verdict flips red: an internal force just became external.',
+            due: 'Oct 15',
+            status: 'built',
+            component: lazy(() => import('./courses/sp211/ch08-momentum/CollisionSetupFramer')),
+          },
         ],
       },
       {

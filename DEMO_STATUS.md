@@ -39,6 +39,7 @@ Rev = human-reviewed & signed off.
 | D15 · Work & Power Visualizer | `ch06-work/work` · dot/area/power | ✅ | ✅ | ⬜ | |
 | D18 · Energy Landscape Explorer | `ch07-energy/landscape` · default/equilibria/dissipation | ✅ | ✅ | ⬜ | |
 | D22 · Collision Sandbox | `ch08-momentum/collisions` · 1d/impulse/2d | ✅ | ✅ | ⬜ | |
+| D22b · Collision Setup Framer | `ch08-momentum/setup` | ✅ | — | ⬜ | Setup trainer (no solver); companion to the Thu 10/15 Collision Setup Studio runsheet |
 
 ## Unit III — Rotation, Gravity & Fluids
 
