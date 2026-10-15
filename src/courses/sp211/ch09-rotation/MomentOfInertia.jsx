@@ -767,51 +767,89 @@ function PointMassBuilder() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TORQUE MODE (L26)
+// TORQUE MODE (L26) — two sub-tools behind a tab; wrapper stays hook-light.
+//   bolt    : the seized-bolt / lever-arm tool (τ = r F sinφ, break it loose)
+//   balance : an inverted pole you keep upright with ←/→ — a long pole (big I)
+//             is EASIER, the primer's pencil-vs-broom made playable.
 // ═════════════════════════════════════════════════════════════════════════════
 function TorqueMode() {
+  const [tab, setTab] = useState('bolt'); // bolt | balance
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-2 flex-wrap">
+        {[['bolt', 'Seized bolt · τ = r F sinφ'], ['balance', 'Balancing game ←/→']].map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
+              tab === k
+                ? 'bg-usna-gold text-usna-navy border-usna-gold'
+                : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
+            }`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      {tab === 'bolt' ? <SeizedBolt /> : <BalanceGame />}
+    </div>
+  );
+}
+
+function SeizedBolt() {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
 
   const [force, setForce] = useState(40);        // N
   const [lever, setLever] = useState(0.3);       // m (application point along wrench)
-  const [angleDeg, setAngleDeg] = useState(90);  // deg between wrench and force
+  const [phiDeg, setPhiDeg] = useState(90);      // deg between r (handle) and F
+  const [tauBreak, setTauBreak] = useState(15);  // N·m the seized bolt needs to break loose
 
-  const reset = () => { setForce(40); setLever(0.3); setAngleDeg(90); };
+  const reset = () => { setForce(40); setLever(0.3); setPhiDeg(90); setTauBreak(15); };
 
-  const theta = (angleDeg * Math.PI) / 180;
-  const torque = lever * force * Math.sin(theta);  // N·m
-  const leverArm = lever * Math.sin(theta);        // perpendicular distance, m
-  const fPerpN = force * Math.sin(theta);          // component square to handle (does the work)
-  const fParN = force * Math.cos(theta);           // component along handle (wasted)
+  const phi = (phiDeg * Math.PI) / 180;
+  const torque = lever * force * Math.sin(phi);    // N·m
+  const leverArm = lever * Math.sin(phi);          // perpendicular distance, m
+  const fPerpN = force * Math.sin(phi);            // component square to handle (does the work)
+  const fParN = force * Math.cos(phi);             // component along handle (wasted)
+  const broke = Math.abs(torque) >= tauBreak;      // did we clear the break-loose threshold?
 
-  const live = useRef({ force, lever, theta });
-  live.current = { force, lever, theta };
+  const live = useRef({ force, lever, phi, tauBreak });
+  live.current = { force, lever, phi, tauBreak };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    let ctx, W, H, raf, last, twitch = 0;
+    let ctx, W, H, raf, last, boltSpin = 0;
 
     const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
 
     const draw = (now) => {
       if (last === undefined) last = now;
       const dt = clampDt(now, last); last = now;
-      const { force: F, lever: r, theta: th } = live.current;
+      const { force: F, lever: r, phi: ph, tauBreak: tb } = live.current;
 
-      const tq = r * F * Math.sin(th);
-      // FIX: the wrench used to accumulate spin and drift, so "pull along the
-      // handle → τ=0" rotated away from its canonical +x orientation. Keep the
-      // handle anchored along +x (spin fixed at 0) and express torque as a small
-      // bounded "twitch" that relaxes back to rest — the geometry never drifts.
-      const twTarget = Math.max(-0.18, Math.min(0.18, tq * 0.02));
-      twitch += (twTarget - twitch) * Math.min(1, dt * 6);
-      const spin = twitch; // small, bounded, self-centering — canonical geometry stays
+      const tq = r * F * Math.sin(ph);
+      // The bolt is SEIZED: it holds until the applied torque clears the break-loose
+      // threshold tb. While seized the wrench is held perfectly STILL (spin = 0) so
+      // the force decomposition and its labels never jitter. Clear the threshold and
+      // the bolt CRACKS LOOSE and turns, faster the more τ exceeds tb — the payoff
+      // that rewards a long lever and a square (φ→90°) push. While it spins we drop
+      // the fine vector labels (they would whirl around and smear).
+      const broken = Math.abs(tq) >= tb;
+      let spin;
+      if (broken) {
+        const rate = Math.min(6, 0.6 + (Math.abs(tq) - tb) * 0.25); // rad/s, capped
+        boltSpin += Math.sign(tq) * rate * dt;
+        spin = boltSpin;
+      } else {
+        boltSpin = 0; // re-seizes level the moment torque drops back below threshold
+        spin = 0;     // static while seized — nothing moves, so no label jitter
+      }
 
       ctx.clearRect(0, 0, W, H);
-      const cx = W * 0.40, cy = H * 0.55;
+      const cx = W * 0.36, cy = H * 0.46;
       const pxPerM = Math.min(W, H) * 0.9; // scale wrench length to canvas
 
       // --- bolt head (hex) ---
@@ -852,18 +890,22 @@ function TorqueMode() {
       ctx.stroke();
       ctx.restore();
 
+      // The force decomposition and all its labels are drawn ONLY while the bolt is
+      // seized (spin = 0, static). Once it breaks loose and spins, this whole block
+      // is skipped so nothing whirls around.
+      if (!broken) {
       // application point (tip of the lever), in world coords with spin
       const ax = cx + handleLen * Math.cos(spin);
       const ay = cy + handleLen * Math.sin(spin);
 
-      // force vector at the application point, at angle th relative to the handle
+      // force vector at the application point, at angle φ relative to the handle
       const fLen = (F / 80) * pxPerM * 0.35;
-      const fdir = spin + th;                 // force direction in world frame
+      const fdir = spin + ph;                 // force direction in world frame
       const fx = ax + fLen * Math.cos(fdir);
       const fy = ay + fLen * Math.sin(fdir);
 
       // --- perpendicular lever arm: drop a perpendicular from the bolt onto the
-      // force's line of action; that length is r·sinθ, the TRUE lever arm ---
+      // force's line of action; that length is r·sinφ, the TRUE lever arm ---
       const dirx = Math.cos(fdir), diry = Math.sin(fdir);
       const vx = cx - ax, vy = cy - ay;
       const t = vx * dirx + vy * diry;        // projection onto the line
@@ -875,8 +917,8 @@ function TorqueMode() {
       ctx.setLineDash([6, 7]);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(ax - dirx * 600, ay - diry * 600);
-      ctx.lineTo(ax + dirx * 600, ay + diry * 600);
+      ctx.moveTo(ax - dirx * 300, ay - diry * 300);
+      ctx.lineTo(ax + dirx * 300, ay + diry * 300);
       ctx.stroke();
       ctx.setLineDash([]);
 
@@ -902,9 +944,18 @@ function TorqueMode() {
       const fVecX = fx - ax, fVecY = fy - ay;
       const fPar = fVecX * hx + fVecY * hy;                 // scalar F∥ (px)
       const fPerp = fVecX * nx + fVecY * ny;                // scalar F⊥ (px)
-      // F∥ (wasted) — drawn from the application point along the handle
+      // F∥ (wasted) — drawn from the application point along the handle. Label is
+      // nudged off the handle (perpendicular, opposite the F⊥ arrow) so it never
+      // sits on the shaft.
       if (Math.abs(fPar) > 4) {
-        arrow(ctx, ax, ay, ax + fPar * hx, ay + fPar * hy, MUTED, 2.5, 'F∥');
+        const tx = ax + fPar * hx, ty = ay + fPar * hy;
+        arrow(ctx, ax, ay, tx, ty, MUTED, 2.5);
+        const side = fPerp >= 0 ? -1 : 1;
+        ctx.fillStyle = MUTED;
+        ctx.font = 'bold 15px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('F∥', tx + hx * 12 + nx * 15 * side, ty + hy * 12 + ny * 15 * side);
       }
       // F⊥ (does the work) — perpendicular to the handle
       if (Math.abs(fPerp) > 4) {
@@ -923,28 +974,44 @@ function TorqueMode() {
       // force arrow (drawn last so it sits on top of its components)
       arrow(ctx, ax, ay, fx, fy, RED, 3.5, 'F');
 
-      // lever-arm label
-      const armMid = { x: (cx + footX) / 2, y: (cy + footY) / 2 };
+      // lever-arm label — offset perpendicular to the arm, on the side AWAY from the
+      // force vector (a stable choice that never flips frame-to-frame), with enough
+      // clearance that it never prints across the shaft or the arrows.
       ctx.fillStyle = GOLD;
       ctx.font = 'bold 13px JetBrains Mono, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const armLen = Math.hypot(footX - cx, footY - cy);
-      if (armLen > 6) ctx.fillText('r⊥ = r sinθ', armMid.x, armMid.y - 16);
+      if (armLen > 10) {
+        const ux = (footX - cx) / armLen, uy = (footY - cy) / armLen; // along the arm
+        let onx = -uy, ony = ux;                                       // normal to the arm
+        if (onx * dirx + ony * diry > 0) { onx = -onx; ony = -ony; }   // away from the force
+        ctx.fillText('r⊥', (cx + footX) / 2 + onx * 20, (cy + footY) / 2 + ony * 20);
+      }
+      } // end if (!broken)
 
-      // live τ readout in the corner
+      // live τ readout + seized / broke-loose status in the corner
       ctx.fillStyle = TEXT;
       ctx.font = '13px JetBrains Mono, monospace';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'top';
       ctx.fillText(`τ = ${tq.toFixed(1)} N·m`, W - 12, 12);
+      if (broken) {
+        ctx.fillStyle = GREEN;
+        ctx.font = 'bold 14px JetBrains Mono, monospace';
+        ctx.fillText('✓ BROKE LOOSE', W - 12, 32);
+      } else {
+        ctx.fillStyle = RED;
+        ctx.font = 'bold 13px JetBrains Mono, monospace';
+        ctx.fillText(`SEIZED · needs τ ≥ ${tb.toFixed(0)}`, W - 12, 32);
+      }
 
       // --- twist gauge: a curved arrow around the bolt whose sweep shows the
       // torque being applied. The bolt is tight, so the wrench does not actually
       // turn it; the handle flexes by an amount set by τ and relaxes back to level
       // when the torque eases. This is what "moves the arm" and returns it. ---
       const twMag = Math.min(1.7, Math.abs(tq) * 0.045);
-      if (twMag > 0.05) {
+      if (!broken && twMag > 0.05) {
         const dir = tq >= 0 ? 1 : -1;           // canvas +angle sweeps clockwise
         const rad = 40;
         const a0 = -Math.PI / 2 - dir * 0.15;   // start near the top of the bolt
@@ -973,13 +1040,13 @@ function TorqueMode() {
         ctx.fillText('twist τ', cx, cy - rad - 8);
       }
 
-      // caption: explain the flex-and-return so the motion is not mysterious
+      // caption: explain the seized-bolt payoff so the motion is not mysterious
       ctx.fillStyle = hexA(TEXT, 0.7);
       ctx.font = '11px JetBrains Mono, monospace';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('The bolt is tight: the wrench flexes by the torque you apply', 12, H - 26);
-      ctx.fillText('and springs back to level as the torque eases (lower F, or θ → 0°).', 12, H - 12);
+      ctx.fillText('The bolt is seized: it holds still until your torque reaches the break-loose value,', 12, H - 26);
+      ctx.fillText('then it cracks loose and turns. A longer lever or a square (φ→90°) push frees it; φ→0° never does.', 12, H - 12);
 
       raf = requestAnimationFrame(draw);
     };
@@ -996,29 +1063,303 @@ function TorqueMode() {
       <ControlPanel onReset={reset}>
         <Slider label="Force magnitude (F)" value={force} min={5} max={80} step={5} unit="N" onChange={setForce} />
         <Slider label="Lever length (r)" value={lever} min={0.1} max={0.5} step={0.02} unit="m" onChange={setLever} />
-        <Slider label="Angle (θ)" value={angleDeg} min={0} max={180} step={5} unit="°" onChange={setAngleDeg} />
+        <Slider label="Angle φ (between r and F)" value={phiDeg} min={0} max={180} step={5} unit="°" onChange={setPhiDeg} />
+        <Slider label="Bolt break-loose τ" value={tauBreak} min={2} max={30} step={1} unit="N·m" onChange={setTauBreak} />
 
         <div className="mt-2 border-t border-usna-grid pt-3">
-          <Readout label="Lever arm r⊥ = r sinθ" value={leverArm.toFixed(3)} unit="m" />
-          <Readout label="F⊥ = F sinθ (does work)" value={fPerpN.toFixed(1)} unit="N" />
-          <Readout label="F∥ = F cosθ (wasted)" value={fParN.toFixed(1)} unit="N" />
+          <Readout label="Lever arm r⊥ = r sinφ" value={leverArm.toFixed(3)} unit="m" />
+          <Readout label="F⊥ = F sinφ (does work)" value={fPerpN.toFixed(1)} unit="N" />
+          <Readout label="F∥ = F cosφ (wasted)" value={fParN.toFixed(1)} unit="N" />
           <Readout label="Torque τ = r F⊥" value={torque.toFixed(2)} unit="N·m" />
+          <Readout label="Bolt" value={broke ? '✓ broke loose' : 'seized'} unit={broke ? '' : `need ${tauBreak} N·m`} />
         </div>
         <p className="text-usna-muted text-xs mt-3 leading-relaxed">
-          The bolt is tight, so the wrench does not spin it; the handle flexes by the torque you
-          apply (the gold twist gauge) and returns to level as the torque eases. Slide θ to 0°
-          (pull straight along the wrench): F is huge but it is <em>all</em> F∥ (gray, along the
-          handle) and F⊥ (green) is zero, so τ = 0. Two equivalent pictures: the perpendicular
-          lever arm r⊥ (gold), or the perpendicular force F⊥, both give τ = r F sinθ.
+          The bolt is <em>seized</em>: it holds until your torque reaches the break-loose value, then it
+          cracks loose and turns. Push straight along the wrench (φ = 0°) and F is huge but it is
+          <em> all</em> F∥ (gray, along the handle) while F⊥ (green) is zero, so τ = 0 and the bolt never
+          moves. Lengthen the lever or square the push toward φ = 90° to free it. Two equivalent pictures
+          of the same torque: the perpendicular lever arm r⊥ (gold), or the perpendicular force F⊥, both
+          give τ = r F sinφ.
         </p>
       </ControlPanel>
 
       <div className="flex-1 min-w-0 flex flex-col gap-4">
         <div ref={wrapRef} className="border border-usna-grid rounded-lg min-w-0 overflow-hidden"
-             style={{ height: 420, background: DEEP }}>
+             style={{ height: 520, background: DEEP }}>
           <canvas ref={canvasRef} className="block" />
         </div>
         <InfoPanel {...INFO.torque} />
+      </div>
+    </div>
+  );
+}
+
+// ── Balancing game: an inverted pole hinged at a movable base. Hold ←/→ to slide
+// the base and keep it upright. For a uniform rod the tip dynamics are
+//   θ'' = (3 / 2L)(g sinθ − a_base cosθ),
+// so the 1/L makes a LONG pole (large I = ⅓ M L²) tip slowly and forgive — the
+// primer's pencil-vs-broom, made playable. Mass cancels, so there is no mass knob.
+function BalanceGame() {
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  const [length, setLength] = useState(0.30);    // m, pole length
+  const [mass, setMass] = useState(0.5);         // kg — changes I and torque, but NOT the tip rate
+  const [status, setStatus] = useState('ready'); // ready | running | dropped
+  const [tBal, setTBal] = useState(0);           // live survival time (s)
+  const [best, setBest] = useState(0);
+
+  const I = (1 / 3) * mass * length * length;
+  const tauGrav15 = mass * 9.81 * (length / 2) * Math.sin(15 * Math.PI / 180); // grav torque at 15° lean
+  const tipTau = Math.sqrt((2 * length) / (3 * 9.81)); // tip timescale ∝ √L, independent of mass
+
+  const sim = useRef({ theta: 0, omega: 0, xb: 0, vb: 0, t: 0, tHit: 0, key: 0 });
+  const keys = useRef({ left: false, right: false });
+  const cfg = useRef({ length, mass, running: false });
+  cfg.current = { length, mass, running: status === 'running' };
+  const bestRef = useRef(0); bestRef.current = best;
+
+  const startGame = () => {
+    sim.current = { theta: 0.05, omega: 0, xb: 0, vb: 0, t: 0, tHit: 0, key: 0 }; // small initial lean
+    setTBal(0); setStatus('running');
+  };
+  const statusRef = useRef(status); statusRef.current = status;
+  const startRef = useRef(startGame); startRef.current = startGame;
+
+  // keyboard: ←/→ move the hand (block page scroll while playing); SPACE (re)starts
+  // whenever you are not already balancing.
+  useEffect(() => {
+    const down = (e) => {
+      if (e.key === 'ArrowLeft') { keys.current.left = true; if (cfg.current.running) e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { keys.current.right = true; if (cfg.current.running) e.preventDefault(); }
+      else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); if (statusRef.current !== 'running') startRef.current(); }
+    };
+    const up = (e) => {
+      if (e.key === 'ArrowLeft') keys.current.left = false;
+      if (e.key === 'ArrowRight') keys.current.right = false;
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current, wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    let ctx, W, H, raf, last, lastPush = 0;
+    const g = 9.81, A = 14, FALL = (Math.PI / 2) * 0.97; // let it fall nearly flat before it counts as down
+    const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
+
+    // a curved torque arrow around the pivot; the sign of tq sets the curl direction
+    const torqueArc = (cx, cy, radius, tq, color) => {
+      if (Math.abs(tq) < 0.05) return;
+      const sweep = Math.max(0.3, Math.min(1.5, Math.abs(tq) * 0.32));
+      const dir = tq >= 0 ? 1 : -1;
+      const a0 = -Math.PI / 2, a1 = a0 + dir * sweep;
+      ctx.strokeStyle = color; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(cx, cy, radius, Math.min(a0, a1), Math.max(a0, a1)); ctx.stroke();
+      const hx = cx + radius * Math.cos(a1), hy = cy + radius * Math.sin(a1);
+      const tx = -Math.sin(a1) * dir, ty = Math.cos(a1) * dir, hs = 9;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(hx - tx * hs - ty * hs * 0.6, hy - ty * hs + tx * hs * 0.6);
+      ctx.lineTo(hx - tx * hs + ty * hs * 0.6, hy - ty * hs - tx * hs * 0.6);
+      ctx.closePath(); ctx.fill();
+    };
+
+    const draw = (now) => {
+      if (last === undefined) last = now;
+      const dt = clampDt(now, last); last = now;
+      const L = cfg.current.length;
+      const s = sim.current;
+      const running = cfg.current.running;
+
+      if (running) {
+        const key = (keys.current.right ? 1 : 0) - (keys.current.left ? 1 : 0);
+        s.key = key;
+        const steps = 3, h = dt / steps;
+        for (let k = 0; k < steps; k++) {
+          // Hand acceleration: purely your input, with light damping so the hand coasts
+          // to a stop when you let go. No spring and no wall — there is no edge to pin
+          // against, so you can always accelerate either way to correct. (No mass here:
+          // it cancels from the tip dynamics below.)
+          const aBase = key * A - 2.5 * s.vb;
+          s.vb += aBase * h;
+          s.xb += s.vb * h;
+          // Uniform-rod tip dynamics. Gravity torque ∝ M and I = ⅓ML² ∝ M, so M cancels:
+          // the angular acceleration depends on LENGTH, never on mass.
+          const thdd = (3 / (2 * L)) * (g * Math.sin(s.theta) - aBase * Math.cos(s.theta));
+          s.omega = s.omega * 0.9995 + thdd * h;
+          s.theta += s.omega * h;
+        }
+        s.t += dt;
+        if (Math.abs(s.theta) >= FALL) {        // it has fallen all the way over
+          s.theta = Math.sign(s.theta) * FALL; s.omega = 0; s.tHit = 0;
+          if (s.t > bestRef.current) setBest(s.t);
+          setTBal(s.t); setStatus('dropped');
+        } else if (now - lastPush > 100) { lastPush = now; setTBal(s.t); }
+      } else if (status === 'dropped') {
+        s.tHit += dt;                            // settle-bounce timer for the landing
+      }
+
+      ctx.clearRect(0, 0, W, H);
+      const massV = cfg.current.mass;
+      const groundY = H * 0.82;
+      const pxPerM = Math.min((H * 0.78) / 4.0, W * 0.13); // scale so the longest (4 m) pole fits
+      const cx = W / 2;               // the hand stays centered; the ground scrolls to show its travel
+      const Lpx = L * pxPerM;
+
+      // ground line
+      ctx.strokeStyle = hexA(TEXT, 0.3); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
+      // scrolling ground ticks show how far the hand has slid — it never leaves the
+      // screen, so there is no edge to lose against
+      const spacingPx = 0.5 * pxPerM * 0.6;
+      if (spacingPx > 4) {
+        const off = ((((-s.xb * pxPerM * 0.6) % spacingPx) + spacingPx) % spacingPx);
+        ctx.strokeStyle = hexA(TEXT, 0.16); ctx.lineWidth = 2;
+        for (let x = off; x < W; x += spacingPx) {
+          ctx.beginPath(); ctx.moveTo(x, groundY); ctx.lineTo(x, groundY + 10); ctx.stroke();
+        }
+      }
+
+      // faint vertical reference
+      ctx.strokeStyle = hexA(TEXT, 0.12); ctx.setLineDash([4, 6]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx, groundY); ctx.lineTo(cx, groundY - Lpx); ctx.stroke(); ctx.setLineDash([]);
+
+      // after it lands, let the pole wobble a little as it settles, for fun
+      let theta = s.theta;
+      if (!running && status === 'dropped') {
+        theta = Math.sign(s.theta) * (FALL - 0.16 * Math.exp(-4 * s.tHit) * Math.sin(s.tHit * 16));
+      }
+
+      // hand / base
+      ctx.fillStyle = hexA(GOLD, 0.9);
+      ctx.fillRect(cx - 26, groundY, 52, 12);
+
+      // torque arcs about the pivot, only while balancing: red = gravity (tips it),
+      // green = your correction. BOTH scale with mass, yet the pole moves the same —
+      // the visual proof that mass cancels.
+      if (running) {
+        const tauG = massV * g * (L / 2) * Math.sin(s.theta);
+        torqueArc(cx, groundY, 46, tauG, RED);
+        if (s.key !== 0) {
+          const tauYou = -massV * (s.key * A) * (L / 2) * Math.cos(s.theta);
+          torqueArc(cx, groundY, 31, tauYou, GREEN);
+        }
+      }
+
+      // pole — thicker when heavier, so the mass is visible even though it does not
+      // change how the pole tips
+      const poleCol = running ? BLUE : (status === 'dropped' ? RED : MUTED);
+      const topX = cx + Lpx * Math.sin(theta);
+      const topY = groundY - Lpx * Math.cos(theta);
+      ctx.strokeStyle = poleCol; ctx.lineWidth = Math.max(4, Math.min(16, 4 + massV * 2.2)); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx, groundY); ctx.lineTo(topX, topY); ctx.stroke();
+      ctx.fillStyle = poleCol;
+      ctx.beginPath(); ctx.arc(topX, topY, Math.max(7, Math.min(16, 7 + massV * 2)), 0, TAU); ctx.fill();
+
+      // impact sparks + THUD right when it lands
+      if (!running && status === 'dropped' && s.tHit < 0.3) {
+        const sp = 1 - s.tHit / 0.3;
+        ctx.strokeStyle = hexA(GOLD, 0.9 * sp); ctx.lineWidth = 2.5;
+        for (let i = 0; i < 7; i++) {
+          const a = -Math.PI / 2 + (i - 3) * 0.45;
+          ctx.beginPath();
+          ctx.moveTo(topX + 10 * Math.cos(a), topY + 10 * Math.sin(a));
+          ctx.lineTo(topX + (10 + 26 * sp) * Math.cos(a), topY + (10 + 26 * sp) * Math.sin(a));
+          ctx.stroke();
+        }
+        ctx.fillStyle = GOLD; ctx.font = 'bold 18px JetBrains Mono, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText('THUD!', topX, topY - 16);
+      }
+
+      // HUD
+      ctx.fillStyle = TEXT; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = 'bold 18px JetBrains Mono, monospace';
+      ctx.fillText(`${s.t.toFixed(1)} s`, 14, 12);
+      ctx.font = '12px JetBrains Mono, monospace'; ctx.fillStyle = hexA(TEXT, 0.75);
+      ctx.fillText(`L = ${L.toFixed(2)} m   M = ${massV.toFixed(1)} kg   I = ${((1 / 3) * massV * L * L).toFixed(3)} kg·m²`, 14, 36);
+      if (running) {
+        ctx.font = '12px JetBrains Mono, monospace';
+        ctx.fillStyle = RED; ctx.fillText('● gravity torque', 14, H - 42);
+        ctx.fillStyle = GREEN; ctx.fillText('● your torque (hold ← / →)', 14, H - 24);
+      }
+
+      if (!running) {
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = status === 'dropped' ? RED : hexA(TEXT, 0.85);
+        ctx.font = 'bold 20px JetBrains Mono, monospace';
+        ctx.fillText(status === 'dropped' ? `Toppled after ${s.t.toFixed(1)} s` : 'Press Start, then ← / → to balance', W / 2, H * 0.24);
+        ctx.font = '13px JetBrains Mono, monospace'; ctx.fillStyle = hexA(TEXT, 0.65);
+        ctx.fillText(status === 'dropped' ? 'Press SPACE to play again' : 'Slide your hand toward the side it is leaning.', W / 2, H * 0.24 + 26);
+      }
+
+      raf = requestAnimationFrame(draw);
+    };
+    resize(); raf = requestAnimationFrame(draw);
+    const ro = new ResizeObserver(resize); ro.observe(wrap);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, [status]);
+
+  const preset = (val) => { setLength(val); };
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-6">
+      <ControlPanel onReset={() => { setLength(0.30); setMass(0.5); setStatus('ready'); setTBal(0); setBest(0); }}>
+        <button
+          onClick={startGame}
+          className="w-full py-2 rounded text-sm font-semibold bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors mb-3"
+        >
+          {status === 'running' ? '↻ Restart' : status === 'dropped' ? '▶ Play again' : '▶ Start'}
+        </button>
+
+        <div className="text-usna-text text-sm font-medium mb-2">Pole</div>
+        <div className="flex gap-2 mb-2">
+          {[['Pencil', 0.15], ['Ruler', 0.30], ['Broom', 1.40], ['Pole', 3.50]].map(([lab, v]) => (
+            <button
+              key={lab}
+              onClick={() => preset(v)}
+              className={`flex-1 py-1.5 rounded text-xs font-medium border transition-colors ${
+                Math.abs(length - v) < 1e-6
+                  ? 'bg-usna-gold text-usna-navy border-usna-gold'
+                  : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
+              }`}
+            >
+              {lab}
+            </button>
+          ))}
+        </div>
+        <Slider label="Pole length (L)" value={length} min={0.15} max={4} step={0.05} unit="m" onChange={setLength} />
+        <Slider label="Pole mass (M)" value={mass} min={0.1} max={3} step={0.1} unit="kg" onChange={setMass} />
+
+        <div className="mt-3 border-t border-usna-grid pt-3">
+          <Readout label="balanced" value={tBal.toFixed(1)} unit="s" />
+          <Readout label="best" value={best.toFixed(1)} unit="s" />
+          <Readout label="grav. torque (at 15°) ∝ M·L" value={tauGrav15.toFixed(2)} unit="N·m" />
+          <Readout label="I = ⅓ M L² ∝ M·L²" value={I.toFixed(3)} unit="kg·m²" />
+          <Readout label="tip time ∝ √L (no M)" value={tipTau.toFixed(2)} unit="s" />
+        </div>
+        <p className="text-usna-muted text-xs mt-3 leading-relaxed">
+          Hold <strong>←</strong> / <strong>→</strong> to keep the pole up; <strong>Space</strong> to retry. Red arc =
+          gravity's torque, green = yours. Try <em>Pencil → Ruler → Broom → Pole</em>: longer is dramatically easier,
+          because the tip rate is θ'' = (3g/2L)·sinθ, so it slows as 1/L.
+        </p>
+        <p className="text-usna-muted text-xs mt-2 leading-relaxed">
+          Now raise the <em>mass</em>: gravity's torque grows (∝ M) and so does the moment of inertia (∝ M), so they
+          <em> cancel</em> and the difficulty does not change at all. A heavy pole and a light pole of the same length
+          balance identically. Longer always helps; heavier, on its own, does nothing.
+        </p>
+      </ControlPanel>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div ref={wrapRef} className="border border-usna-grid rounded-lg min-w-0 overflow-hidden"
+             style={{ height: 520, background: DEEP }}>
+          <canvas ref={canvasRef} className="block" />
+        </div>
+        <InfoPanel {...INFO.balance} />
       </div>
     </div>
   );
@@ -1028,11 +1369,11 @@ function TorqueMode() {
 // DYNAMICS MODE (L27) — two sub-tools behind a tab; wrapper stays hook-light.
 // ═════════════════════════════════════════════════════════════════════════════
 function DynamicsMode() {
-  const [tab, setTab] = useState('playground'); // playground | atwood
+  const [tab, setTab] = useState('playground'); // playground | atwood | power
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex gap-2">
-        {[['playground', 'Στ = Iα playground'], ['atwood', 'Massive-pulley Atwood']].map(([k, l]) => (
+      <div className="flex gap-2 flex-wrap">
+        {[['playground', 'Στ = Iα playground'], ['atwood', 'Massive-pulley Atwood'], ['power', 'Power P = τω']].map(([k, l]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -1046,7 +1387,7 @@ function DynamicsMode() {
           </button>
         ))}
       </div>
-      {tab === 'playground' ? <TorquePlayground /> : <AtwoodPulley />}
+      {tab === 'playground' ? <TorquePlayground /> : tab === 'atwood' ? <AtwoodPulley /> : <PowerCurves />}
     </div>
   );
 }
@@ -1490,6 +1831,201 @@ function AtwoodPulley() {
   );
 }
 
+// ── Power P = τω: an engine's torque falls off with speed, but power is their
+// PRODUCT, so peak power lives at a higher rpm than peak torque — the primer's
+// two peaks, made interactive. ────────────────────────────────────────────────
+function PowerCurves() {
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  const [tauPeak, setTauPeak] = useState(300);   // N·m, peak torque
+  const [nTau, setNTau] = useState(4500);        // rpm where torque peaks
+  const [redline, setRedline] = useState(7000);  // rpm ceiling
+  const [rpm, setRpm] = useState(3000);          // current engine speed
+  const [running, setRunning] = useState(false);
+
+  const IDLE = 800;
+  const SIGMA = 2200;                             // rpm width of the torque hump
+  const toW = (n) => (n * TAU) / 60;             // rpm → rad/s
+
+  // Gaussian torque hump (peak tauPeak at nTau); power is the product τ·ω.
+  const tauAt = (n) => tauPeak * Math.exp(-0.5 * ((n - nTau) / SIGMA) ** 2);
+  const powAt = (n) => tauAt(n) * toW(n);        // W
+
+  // sample the band for the curves and the power peak
+  const N = 120;
+  const ns = Array.from({ length: N + 1 }, (_, i) => IDLE + ((redline - IDLE) * i) / N);
+  const taus = ns.map(tauAt);
+  const pows = ns.map(powAt);
+  let iP = 0; for (let i = 1; i < pows.length; i++) if (pows[i] > pows[iP]) iP = i;
+  const nPow = ns[iP];
+  const nTauVis = Math.max(IDLE, Math.min(redline, nTau)); // torque peak, clamped to band
+
+  const tauNow = tauAt(rpm);
+  const wNow = toW(rpm);
+  const powNow = powAt(rpm);        // W
+  const hpNow = powNow / 746;
+
+  const reset = () => { setTauPeak(300); setNTau(4500); setRedline(7000); setRpm(3000); setRunning(false); };
+  useEffect(() => { setRpm((r) => Math.max(IDLE, Math.min(redline, r))); }, [redline]);
+
+  // "Rev it up": sweep rpm from where it is up to redline, then hold.
+  const rpmRef = useRef(rpm); rpmRef.current = rpm;
+  useEffect(() => {
+    if (!running) return undefined;
+    let raf, last;
+    const step = (now) => {
+      if (last === undefined) last = now;
+      const dt = clampDt(now, last); last = now;
+      let next = rpmRef.current + (redline - IDLE) * 0.3 * dt; // ~3 s full sweep
+      if (next >= redline) { setRpm(redline); setRunning(false); return; }
+      setRpm(next);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [running, redline]);
+
+  // ── left canvas: tachometer gauge (idle→redline) with τ and P peak ticks, a
+  // needle at the current rpm, and a rotor spinning at a visually-scaled ω ──
+  const liveGauge = useRef({});
+  liveGauge.current = { rpm, tauNow, powNow, tauPeak, nTauVis, nPow, redline, IDLE };
+  useEffect(() => {
+    const canvas = canvasRef.current, wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+    let ctx, W, H, raf, last, spin = 0;
+    const resize = () => { W = wrap.clientWidth; H = wrap.clientHeight; ctx = setupCanvas(canvas, W, H); };
+    const draw = (now) => {
+      if (last === undefined) last = now;
+      const dt = clampDt(now, last); last = now;
+      const g = liveGauge.current;
+      spin += Math.min(14, toW(g.rpm) * 0.12) * dt;
+
+      ctx.clearRect(0, 0, W, H);
+      const cx = W / 2, cy = H * 0.54, R = Math.min(W, H) * 0.32;
+      const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25; // 270° sweep
+      const nToA = (n) => a0 + ((n - g.IDLE) / (g.redline - g.IDLE)) * (a1 - a0);
+
+      ctx.strokeStyle = hexA(TEXT, 0.18); ctx.lineWidth = 10; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
+
+      const tick = (n, col, label) => {
+        const a = nToA(n);
+        ctx.strokeStyle = col; ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(cx + (R - 10) * Math.cos(a), cy + (R - 10) * Math.sin(a));
+        ctx.lineTo(cx + (R + 12) * Math.cos(a), cy + (R + 12) * Math.sin(a));
+        ctx.stroke();
+        ctx.fillStyle = col; ctx.font = 'bold 11px JetBrains Mono, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, cx + (R + 26) * Math.cos(a), cy + (R + 26) * Math.sin(a));
+      };
+      tick(g.nTauVis, GOLD, 'τ');
+      tick(g.nPow, RED, 'P');
+
+      const an = nToA(g.rpm);
+      ctx.strokeStyle = TEXT; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + R * 0.9 * Math.cos(an), cy + R * 0.9 * Math.sin(an)); ctx.stroke();
+
+      drawBody(ctx, cx, cy, R * 0.4, spin, 'cylinder', GOLD);
+
+      // torque curved arrow, thickness ∝ τ/τ_peak
+      const tFrac = g.tauPeak > 0 ? g.tauNow / g.tauPeak : 0;
+      ctx.strokeStyle = hexA(GOLD, 0.9); ctx.lineWidth = 2 + 6 * tFrac;
+      ctx.beginPath(); ctx.arc(cx, cy, R * 0.48, -0.4, 1.2); ctx.stroke();
+
+      ctx.fillStyle = TEXT; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.font = 'bold 20px JetBrains Mono, monospace';
+      ctx.fillText(`${Math.round(g.rpm)} rpm`, cx, cy + R + 8);
+      ctx.fillStyle = hexA(TEXT, 0.75); ctx.font = '12px JetBrains Mono, monospace';
+      ctx.fillText(`P = ${(g.powNow / 1000).toFixed(1)} kW = ${(g.powNow / 746).toFixed(0)} hp`, cx, cy + R + 28);
+
+      raf = requestAnimationFrame(draw);
+    };
+    resize(); raf = requestAnimationFrame(draw);
+    const ro = new ResizeObserver(resize); ro.observe(wrap);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
+  // ── right plot: torque (left axis) and power (right axis) vs engine speed ──
+  const traces = [
+    { x: ns, y: taus, type: 'scatter', mode: 'lines', name: 'Torque τ (N·m)',
+      line: { color: GOLD, width: 3 }, hoverinfo: 'skip' },
+    { x: ns, y: pows.map((p) => p / 1000), type: 'scatter', mode: 'lines', name: 'Power P (kW)',
+      line: { color: RED, width: 3 }, yaxis: 'y2', hoverinfo: 'skip' },
+    { x: [nTauVis], y: [tauAt(nTauVis)], type: 'scatter', mode: 'markers', showlegend: false,
+      marker: { color: GOLD, size: 11, symbol: 'star' }, hoverinfo: 'skip' },
+    { x: [nPow], y: [pows[iP] / 1000], type: 'scatter', mode: 'markers', showlegend: false,
+      marker: { color: RED, size: 11, symbol: 'star' }, yaxis: 'y2', hoverinfo: 'skip' },
+    { x: [rpm, rpm], y: [0, tauPeak * 1.08], type: 'scatter', mode: 'lines', showlegend: false,
+      line: { color: hexA(TEXT, 0.55), width: 1.5, dash: 'dot' }, hoverinfo: 'skip' },
+  ];
+  const layout = {
+    showlegend: true,
+    legend: { orientation: 'h', y: -0.42, x: 0.5, xanchor: 'center', yanchor: 'top', font: { size: 11 } },
+    margin: { l: 56, r: 54, t: 10, b: 76 },
+    xaxis: { title: { text: 'Engine speed (rpm)' }, range: [IDLE, redline], zeroline: false },
+    yaxis: { title: { text: 'Torque (N·m)' }, range: [0, tauPeak * 1.1], zeroline: true },
+    yaxis2: {
+      title: { text: 'Power (kW)' }, overlaying: 'y', side: 'right',
+      range: [0, (pows[iP] / 1000) * 1.15], showgrid: false, zeroline: false,
+    },
+  };
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-6">
+      <ControlPanel onReset={reset}>
+        <Slider label="Current speed" value={Math.round(rpm)} min={IDLE} max={redline} step={50} unit="rpm" onChange={setRpm} />
+        <button
+          onClick={() => { if (rpm >= redline) setRpm(IDLE); setRunning((r) => !r); }}
+          className="w-full py-2 rounded text-sm font-semibold bg-usna-gold text-usna-navy hover:bg-usna-gold-light transition-colors mb-3"
+        >
+          {running ? '❚❚ Pause' : '▶ Rev it up'}
+        </button>
+        <Slider label="Peak torque (τ_peak)" value={tauPeak} min={100} max={400} step={10} unit="N·m" onChange={setTauPeak} />
+        <Slider label="rpm at peak torque" value={nTau} min={2500} max={5500} step={100} unit="rpm" onChange={setNTau} />
+        <Slider label="Redline" value={redline} min={5500} max={8000} step={100} unit="rpm" onChange={setRedline} />
+
+        <div className="mt-3 border-t border-usna-grid pt-3">
+          <Readout label="τ at this speed" value={tauNow.toFixed(0)} unit="N·m" />
+          <Readout label="ω = rpm·2π/60" value={wNow.toFixed(1)} unit="rad/s" />
+          <Readout label="P = τ ω" value={(powNow / 1000).toFixed(1)} unit="kW" />
+          <Readout label="P" value={hpNow.toFixed(0)} unit="hp" />
+        </div>
+        <div className="mt-2 border-t border-usna-grid pt-3">
+          <Readout label="peak torque at" value={Math.round(nTauVis)} unit="rpm" />
+          <Readout label="peak power at" value={Math.round(nPow)} unit="rpm" />
+          <Readout label="gap (P − τ peak)" value={Math.round(nPow - nTauVis)} unit="rpm" />
+        </div>
+        <p className="text-usna-muted text-xs mt-3 leading-relaxed">
+          Torque (gold) peaks in the mid-range and falls off toward redline, yet power (red),
+          P = τω, keeps climbing past it because it is the <em>product</em> of torque and speed, so
+          peak power lives at a higher rpm (the gap). Merging onto a highway you want power; holding a
+          long grade you want torque. Hit <em>Rev it up</em> and watch the needle cross the gold τ
+          mark before the red P mark.
+        </p>
+      </ControlPanel>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div ref={wrapRef} className="border border-usna-grid rounded-lg min-w-0 overflow-hidden"
+             style={{ height: 300, background: DEEP }}>
+          <canvas ref={canvasRef} className="block" />
+        </div>
+        <div className="bg-usna-card border border-usna-grid rounded-lg p-4">
+          <div className="text-usna-text text-sm font-medium mb-2">Torque and power vs engine speed</div>
+          <div className="min-w-0 overflow-hidden" style={{ height: 260 }}>
+            <IntensityPlot traces={traces} layoutOverrides={layout} />
+          </div>
+          <p className="text-usna-muted text-xs mt-2">
+            Gold ★ = peak torque; red ★ = peak power. The dotted line is your current rpm.
+          </p>
+        </div>
+        <InfoPanel {...INFO.power} />
+      </div>
+    </div>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 const INFO = {
   shapes: {
@@ -1501,14 +2037,20 @@ const INFO = {
   torque: {
     title: 'Torque needs the perpendicular lever arm',
     description:
-      'There are two equivalent ways to read τ = r F sinθ. First, the lever-arm picture: force times the perpendicular distance from the axis to the line of action, r⊥ = r sinθ (the gold dashed segment). Second, the component picture: resolve F into F∥ = F cosθ (gray, along the handle, which does no turning) and F⊥ = F sinθ (green, square to the handle, which does the turning), so τ = r F⊥. Pull straight along the wrench (θ = 0) and F is all F∥: zero lever arm, zero F⊥, zero torque. Maximum torque comes at θ = 90°, with the force square to the handle.',
-    equation: String.raw`\tau = r F \sin\theta = r_\perp F = r F_\perp`,
+      'The bolt is seized: it breaks loose only when the torque you apply clears its threshold, so the demo is a goal, not just a readout. There are two equivalent ways to read τ = r F sinφ, where φ is the angle between the position vector r and the force F (as on the course equation sheet). First, the lever-arm picture: force times the perpendicular distance from the axis to the line of action, r⊥ = r sinφ (the gold dashed segment). Second, the component picture: resolve F into F∥ = F cosφ (gray, along the handle, which does no turning) and F⊥ = F sinφ (green, square to the handle, which does the turning), so τ = r F⊥. Push straight along the wrench (φ = 0) and F is all F∥: zero lever arm, zero F⊥, zero torque, and the bolt never moves however hard you push. A longer lever or a square push (φ = 90°) frees it.',
+    equation: String.raw`\tau = r F \sin\varphi = r_\perp F = r F_\perp`,
   },
   builder: {
     title: 'Where the constant c comes from: I = Σ mᵢ rᵢ²',
     description:
       'Moment of inertia is the mass-weighted sum of r² over the body. Drop point masses at chosen radii and each contributes its own mᵢ rᵢ², so a mass twice as far out counts four times as much. Pile mass at the rim and the effective c approaches 1 (a hoop); pile it near the axis and c is small. The "smear" slider then collapses your discrete cloud into a uniform solid disk of the same total mass and outer radius, and the same number reappears as I = ½ M R². The textbook constant c is just ⟨r²⟩/R² for the shape.',
     equation: String.raw`I = \sum_i m_i r_i^2 \;\xrightarrow{\text{continuous}}\; \int r^2\,dm = c\,M R^2`,
+  },
+  balance: {
+    title: 'Length is what matters — the mass cancels',
+    description:
+      "Balancing an upright pole is a torque race against gravity. As the pole leans by θ, gravity makes a torque Mg(L/2)sinθ that tips it; you fight back by sliding the base. For a uniform rod the angle obeys θ'' = (3/2L)(g sinθ − a_base cosθ). Look closely: the mass M has CANCELLED. Gravity's torque grows with M, but so does the moment of inertia I = ⅓ML², and dividing torque by inertia removes M entirely. So a heavy pole and a light pole of the same length tip at exactly the same rate — raising the mass does nothing. What is left is the length: the tip timescale grows like √L, so a long broom (or a 4 m pole) falls slowly and is easy to catch, while a short pencil snaps over. It is not that the broom is heavier; it is that it is longer. Same reason a tightrope walker's long pole helps no matter what it weighs.",
+    equation: String.raw`\theta'' = \frac{Mg(L/2)\sin\theta}{\tfrac{1}{3}ML^2}\Big|_{a=0} = \frac{3g}{2L}\sin\theta \quad(\text{no } M)`,
   },
   dynamics: {
     title: 'Στ = Iα, the rotational F = ma',
@@ -1521,5 +2063,11 @@ const INFO = {
     description:
       'The textbook Atwood answer assumes a massless pulley. Give the pulley real inertia and the cord must supply torque to angularly accelerate it, so the two tensions differ and both blocks slow down. Newton for each block plus Στ = Iα for the pulley (solid disk, I = ½Mₚrₚ²) gives a = g(m₁−m₂)/(m₁+m₂+½Mₚ). The pulley contributes half its mass to the effective inertia; slide Mₚ to zero to recover the classic result.',
     equation: String.raw`a = \frac{g\,(m_1 - m_2)}{m_1 + m_2 + \tfrac{1}{2}M_p}`,
+  },
+  power: {
+    title: 'Peak torque and peak power sit at different rpm',
+    description:
+      'Rotational power is P = τω, the rate a torque delivers energy (the analog of P = Fv). An engine’s torque curve (gold) peaks in the mid-range and sags toward redline, but power (red) is torque times angular speed, so it keeps rising past the torque peak and crests later, at a higher rpm — the two stars never line up. That gap is why a car quotes peak torque near 4500 rpm and peak horsepower near 6000. Torque is what accelerates the driven inertia through Στ = Iα; power is how fast that work is delivered, so you lean on power to accelerate and on torque to pull a load at low speed.',
+    equation: String.raw`P = \tau\,\omega, \qquad \omega = \frac{2\pi\,(\text{rpm})}{60}`,
   },
 };
