@@ -12,6 +12,7 @@ export const SHAPES = [
   { key: 'cylinder', label: 'Solid cylinder / disk', cInertia: 0.5, rolls: true, note: 'Uniform disk.' },
   { key: 'shell', label: 'Thin spherical shell', cInertia: 2 / 3, rolls: true, note: 'Hollow ball.' },
   { key: 'sphere', label: 'Solid sphere', cInertia: 0.4, rolls: true, note: 'Uniform ball — the winner.' },
+  { key: 'soup', label: 'Can of soup', cInertia: 0.1, rolls: true, note: 'Liquid barely spins up, so the effective c is tiny (idealized inviscid fill).' },
   { key: 'rod-center', label: 'Rod about center', cInertia: 1 / 12, rolls: false, note: 'I = mL²/12 (uses length, not radius).' },
   { key: 'rod-end', label: 'Rod about end', cInertia: 1 / 3, rolls: false, note: 'I = mL²/3 (parallel-axis from center).' },
 ];

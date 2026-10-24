@@ -165,7 +165,8 @@ export default function CollisionSetupFramer() {
       case 'elastic':
         return [
           { note: 'Momentum (always first):', tex: 'm_1 v_{1i} + m_2 v_{2i} = m_1 v_{1f} + m_2 v_{2f}' },
-          { note: 'Extra fact — elastic (separation = approach):', tex: 'v_{1i} - v_{2i} = v_{2f} - v_{1f}' },
+          { note: 'Second equation — elastic means kinetic energy is conserved:', tex: '\\tfrac12 m_1 v_{1i}^2 + \\tfrac12 m_2 v_{2i}^2 = \\tfrac12 m_1 v_{1f}^2 + \\tfrac12 m_2 v_{2f}^2' },
+          { note: 'Shortcut (skip the quadratic) — separation = approach:', tex: 'v_{1i} - v_{2i} = v_{2f} - v_{1f}' },
           { note: 'Count: 2 equations, 2 unknowns (v_{1f}, v_{2f}). Solvable.', tex: null },
         ];
       case 'explosion':
@@ -347,7 +348,7 @@ export default function CollisionSetupFramer() {
               <li><strong>Watch the trap:</strong> {scenario.kind === 'multiphase'
                 ? 'never run energy conservation through the embedding.'
                 : scenario.type === 'elastic'
-                ? 'use the linear separation = approach rule, not the quadratic.'
+                ? 'the second equation is K conservation; its linear shortcut (separation = approach) just skips the quadratic.'
                 : scenario.kind === 'impulse'
                 ? 'the reversed velocity is negative — Δp adds in magnitude.'
                 : scenario.type === 'explosion'

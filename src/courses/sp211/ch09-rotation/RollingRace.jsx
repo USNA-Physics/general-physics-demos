@@ -68,12 +68,14 @@ const RACER_COLOR = {
   cylinder: '#5B9BD5',  // blue
   sphere: '#7FB77E',    // green
   shell: '#C08BE0',     // violet
+  soup: '#4DB6A8',      // teal — the can of liquid
   mystery: '#E8C46A',   // amber — the unknown c
 };
 
 // Racers this demo can enter. All roll; the classic three are on by default.
-// "mystery" is a special entrant whose c is hidden until the race resolves.
-const RACERS = ['hoop', 'cylinder', 'sphere', 'shell', 'mystery'];
+// "soup" is a can of liquid whose contents barely rotate, so its effective c is
+// tiny and it beats the solid bodies. "mystery" hides its c until the race ends.
+const RACERS = ['hoop', 'cylinder', 'sphere', 'soup', 'shell', 'mystery'];
 
 // Candidate identities the mystery racer can secretly adopt.
 const MYSTERY_POOL = ['sphere', 'cylinder', 'shell', 'hoop'];
@@ -83,7 +85,7 @@ const DEFAULTS = {
   mass: 2,                   // kg — a red herring
   radius: 0.15,              // m — a red herring
   mu: 0.4,                   // assumed coefficient of static friction (for slip warning)
-  entrants: { hoop: true, cylinder: true, sphere: true, shell: false, mystery: false },
+  entrants: { hoop: true, cylinder: true, sphere: true, soup: false, shell: false, mystery: false },
   ice: false,                // frictionless-ice follow-up
 };
 
@@ -103,6 +105,20 @@ const shortLabel = (key, revealId = null) => {
 const labelClean = (key) =>
   byKey[key].label.replace(' / ring', '').replace(' / disk', '');
 
+// A can of soup is not a rigid body: the liquid barely rotates at first (low
+// effective c, nearly sliding), but viscosity drags it up to speed over a
+// coupling length Lc until it co-rotates with the can like a solid cylinder.
+// The physically honest ceiling is therefore cHigh = 0.5 (a solid cylinder), so
+// the effective c stays at or below 0.5: the can never falls behind the solid
+// cylinder, and only the solid sphere (c = 0.4) can overtake it. Because the
+// can's early lead from rest is locked in, that overtake sits hundreds of metres
+// down the ramp, which is why the incline length extends so far.
+const SOUP = { cLow: 0.08, cHigh: 0.5, Lc: 1.0 };
+const cEffSoup = (s) => SOUP.cHigh - (SOUP.cHigh - SOUP.cLow) * Math.exp(-s / SOUP.Lc);
+// how fully the liquid co-rotates with the can, 0 (settled) → 1 (rigid), for the visual
+const soupCouple = (s) =>
+  Math.max(0, Math.min(1, (cEffSoup(s) - SOUP.cLow) / (SOUP.cHigh - SOUP.cLow)));
+
 export default function RollingRace({ mode = 'default' }) {
   const [angle, setAngle] = useState(DEFAULTS.angle);
   const [mass, setMass] = useState(DEFAULTS.mass);
@@ -110,6 +126,8 @@ export default function RollingRace({ mode = 'default' }) {
   const [mu, setMu] = useState(DEFAULTS.mu);
   const [entrants, setEntrants] = useState({ ...DEFAULTS.entrants });
   const [ice, setIce] = useState(DEFAULTS.ice);
+  const [timeScale, setTimeScale] = useState(1); // playback speed (slow motion < 1)
+  const [trackLen, setTrackLen] = useState(3);   // incline length (m) — frozen at release
 
   const [vote, setVote] = useState(null);   // racer key the student bet on
   const [poll, setPoll] = useState({});     // { key: count } — class-poll tally
@@ -138,9 +156,12 @@ export default function RollingRace({ mode = 'default' }) {
   const massRef = useRef(mass); massRef.current = mass;
   const radiusRef = useRef(radius); radiusRef.current = radius;
   const iceRef = useRef(ice); iceRef.current = ice;
+  const timeScaleRef = useRef(timeScale); timeScaleRef.current = timeScale;
+  const trackLenRef = useRef(trackLen); trackLenRef.current = trackLen;
   const runningRef = useRef(running); runningRef.current = running;
   const entrantsRef = useRef(entrants); entrantsRef.current = entrants;
   const mysteryIdRef = useRef(mysteryId); mysteryIdRef.current = mysteryId;
+  const finishOrderRef = useRef(finishOrder); finishOrderRef.current = finishOrder;
 
   const activeKeys = useMemo(
     () => RACERS.filter((k) => entrants[k]),
@@ -154,6 +175,8 @@ export default function RollingRace({ mode = 'default' }) {
     setMu(DEFAULTS.mu);
     setEntrants({ ...DEFAULTS.entrants });
     setIce(DEFAULTS.ice);
+    setTimeScale(1);
+    setTrackLen(3);
     setVote(null);
     setPoll({});
     setRunning(false);
@@ -223,14 +246,17 @@ export default function RollingRace({ mode = 'default' }) {
     // ramp track (world meters) is fixed; the finish is the bottom of the ramp.
     const buildSim = () => {
       const keys = RACERS.filter((k) => entrantsRef.current[k]);
-      const trackLen = 3.0;   // meters of travel down the slope
+      const trackLen = trackLenRef.current;   // meters of travel down the slope
       const theta = angleRef.current;
       const m = massRef.current;
       const r = radiusRef.current;
       const onIce = iceRef.current;
       const mystId = mysteryIdRef.current;
       const racers = keys.map((k, i) => {
-        const c = cOf(k, mystId);
+        // the soup can is a liquid body: its effective c varies with distance, so
+        // it is integrated numerically below rather than by closed-form kinematics.
+        const liquid = k === 'soup' && !onIce;
+        const c = liquid ? cEffSoup(0) : cOf(k, mystId);
         // frictionless ice → no torque → pure sliding, a = g sinθ for all.
         const a = onIce
           ? G * Math.sin((theta * Math.PI) / 180)
@@ -238,7 +264,7 @@ export default function RollingRace({ mode = 'default' }) {
         // total mechanical energy budget = PE dropped over the full track.
         const peTotal = m * G * trackLen * Math.sin((theta * Math.PI) / 180);
         return {
-          key: k, c, a, r, m, lane: i,
+          key: k, c, a, r, m, lane: i, liquid,
           s: 0, v: 0, done: false, tFinish: null, peTotal,
         };
       });
@@ -258,6 +284,11 @@ export default function RollingRace({ mode = 'default' }) {
             kRot: total * rotFrac,
             kTrans: total * (1 - rotFrac),
             done: rc.done,
+            // the full PE budget and the fraction of the track covered, so the
+            // bars and reservoir scale to the real descent (not a running cap)
+            peTotal: rc.peTotal,
+            frac: sim.trackLen > 0 ? rc.s / sim.trackLen : 0,
+            c: rc.c, // current (effective) coefficient — ramps for the soup can
           };
         }
       }
@@ -279,15 +310,24 @@ export default function RollingRace({ mode = 'default' }) {
       if (!(dt > 0) || dt > 0.1) dt = 1 / 60;
 
       if (runningRef.current && sim) {
-        simT += dt;
+        const dStep = dt * timeScaleRef.current; // slow-motion scales simulated time
+        simT += dStep;
         let allDone = true;
         for (const rc of sim.racers) {
           if (!rc.done) {
-            rc.v = rc.a * simT;
-            rc.s = 0.5 * rc.a * simT * simT;
+            if (rc.liquid) {
+              // variable effective c as the liquid spins up: integrate numerically
+              rc.c = cEffSoup(rc.s);
+              rc.a = rollingAccel(rc.c, sim.theta);
+              rc.v += rc.a * dStep;
+              rc.s += rc.v * dStep;
+            } else {
+              rc.v = rc.a * simT;
+              rc.s = 0.5 * rc.a * simT * simT;
+            }
             if (rc.s >= sim.trackLen) {
               rc.s = sim.trackLen;
-              rc.v = Math.sqrt(2 * rc.a * sim.trackLen);
+              if (!rc.liquid) rc.v = Math.sqrt(2 * rc.a * sim.trackLen);
               rc.done = true;
               rc.tFinish = simT;
             } else {
@@ -319,7 +359,7 @@ export default function RollingRace({ mode = 'default' }) {
         publish();
       }
 
-      drawScene(ctx, W, H, sim, angleRef.current, iceRef.current, mysteryIdRef.current);
+      drawScene(ctx, W, H, sim, angleRef.current, iceRef.current, mysteryIdRef.current, finishOrderRef.current);
       raf = requestAnimationFrame(draw);
     };
 
@@ -459,15 +499,24 @@ export default function RollingRace({ mode = 'default' }) {
           {!vote && !running && (
             <div className="text-usna-muted text-xs mt-1.5">Pick a racer to enable release.</div>
           )}
+          <div className="mt-3">
+            <Slider label="Playback speed" value={timeScale} min={0.1} max={6} step={0.1} unit="×" onChange={setTimeScale} />
+            <div className="text-usna-muted text-xs mt-1 leading-snug">
+              Below 1× for slow motion; above 1× to speed through a long ramp. Adjusts during a race.
+            </div>
+          </div>
         </div>
 
         {/* ── incline + red-herring dials ──────────────────────────────── */}
         <div className="border-t border-usna-grid pt-3">
           <Slider label="Incline angle (θ)" value={angle} min={5} max={40} step={1} unit="°" onChange={setAngle} />
+          <Slider label="Incline length" value={trackLen} min={0.5} max={400} step={0.5} unit="m" onChange={setTrackLen} />
           <Slider label="Mass (m)" value={mass} min={0.5} max={10} step={0.5} unit="kg" onChange={setMass} />
           <Slider label="Radius (r)" value={radius} min={0.05} max={0.4} step={0.01} unit="m" onChange={setRadius} />
           <div className="text-usna-muted text-xs mt-1 leading-snug">
-            Try changing mass and radius, then race again — the order never moves.
+            Mass and radius never change the order. Incline length does, but only for
+            the can of soup: it wins ordinary ramps, and the sphere overtakes it only
+            after a few hundred metres. Click the length value to type an exact number.
           </div>
         </div>
 
@@ -483,7 +532,9 @@ export default function RollingRace({ mode = 'default' }) {
               {activeKeys.map((k) => {
                 const c = k === 'mystery'
                   ? cOf(k, mysteryId)          // pre-race: uses current draw (harmless)
-                  : byKey[k].cInertia;
+                  : k === 'soup'
+                    ? SOUP.cHigh               // worst case once the liquid has spun up
+                    : byKey[k].cInertia;
                 if (k === 'mystery' && !mysteryReveal) {
                   return (
                     <div key={k} className="text-xs font-mono text-usna-muted">
@@ -567,11 +618,6 @@ export default function RollingRace({ mode = 'default' }) {
           )}
         </div>
 
-        {/* photo-finish strip — ordered finishers with Δt gaps */}
-        {finished && !ice && finishOrder.length > 0 && (
-          <PhotoFinish order={finishOrder} mysteryId={mysteryId} />
-        )}
-
         {/* live energy partition — reservoir drain + one bar-pair per racer */}
         <div className="bg-usna-card border border-usna-grid rounded-lg p-4 min-w-0 overflow-hidden">
           <div className="flex items-baseline justify-between mb-3">
@@ -600,7 +646,9 @@ export default function RollingRace({ mode = 'default' }) {
           <div className="flex flex-wrap gap-x-8 gap-y-1">
             {activeKeys.map((k) => {
               const hidden = k === 'mystery' && !mysteryReveal;
-              const c = cOf(k, mysteryId);
+              const isSoup = k === 'soup' && !ice;
+              // soup's coefficient is the ramping effective value (current if live)
+              const c = isSoup ? (live[k]?.c ?? SOUP.cLow) : cOf(k, mysteryId);
               const a = ice
                 ? G * Math.sin((angle * Math.PI) / 180)
                 : rollingAccel(c, angle);
@@ -612,7 +660,7 @@ export default function RollingRace({ mode = 'default' }) {
                       {shortLabel(k, k === 'mystery' && mysteryReveal ? mysteryId : null)}
                     </span>
                   </div>
-                  <Readout label="c = I/mr²" value={hidden ? '?' : fmtC(c)} unit="" />
+                  <Readout label={isSoup ? 'c_eff (ramps)' : 'c = I/mr²'} value={hidden ? '?' : fmtC(c)} unit="" />
                   <Readout label="a" value={hidden ? '?' : a.toFixed(2)} unit={hidden ? '' : 'm/s²'} />
                   {live[k] && (
                     <Readout label="v" value={live[k].v.toFixed(2)} unit="m/s" />
@@ -629,55 +677,19 @@ export default function RollingRace({ mode = 'default' }) {
   );
 }
 
-// ── photo-finish strip: ordered finishers with time deltas ──────────────────
-function PhotoFinish({ order, mysteryId }) {
-  return (
-    <div className="bg-usna-card border border-usna-grid rounded-lg p-4 min-w-0 overflow-hidden">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-usna-gold font-semibold text-sm">Photo finish</h3>
-        <span className="text-usna-muted text-xs">Δt behind the leader</span>
-      </div>
-      {/* checkered header strip for flavor */}
-      <div
-        className="h-3 rounded-sm mb-3"
-        style={{
-          backgroundImage:
-            'repeating-linear-gradient(45deg,#F0ECE3 0 8px,#0D1321 8px 16px)',
-          opacity: 0.5,
-        }}
-      />
-      <div className="flex flex-col gap-1.5">
-        {order.map((f, i) => {
-          const col = RACER_COLOR[f.key];
-          const label = shortLabel(f.key, f.key === 'mystery' ? mysteryId : null);
-          return (
-            <div key={f.key} className="flex items-center gap-3 text-sm">
-              <span className="font-mono text-usna-muted w-6 text-right">{i + 1}.</span>
-              <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ background: col }} />
-              <span className="flex-1 text-usna-text truncate">{label}</span>
-              <span
-                className="font-mono text-sm"
-                style={{ color: f.delta === 0 ? '#7FB77E' : TEXT }}
-              >
-                {f.delta === 0 ? 'leader' : `+${f.delta.toFixed(2)} s`}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ── one racer's energy: reservoir drain schematic + K_trans/K_rot bars ──────
 function RacerEnergy({ rk, live, ice, cVal, reveal, revealId }) {
   const col = RACER_COLOR[rk];
   const kTrans = live ? live.kTrans : 0;
   const kRot = live ? live.kRot : 0;
   const total = kTrans + kRot;
-  // fixed scale reference so bars don't jump wildly at t≈0; use the running max
-  const max = Math.max(total, 1);
-  const rotFrac = ice ? 0 : rotationalKEFraction(cVal);
+  // Scale to the full PE budget so the bars grow from empty to full exactly as
+  // the body descends the ramp, instead of snapping full against a running cap.
+  const budget = live && live.peTotal > 0 ? live.peTotal : Math.max(total, 1);
+  // use the live (effective) coefficient when racing, so the soup can's fork
+  // ratio and rotational share are seen to climb as its liquid spins up
+  const cNow = live && live.c != null ? live.c : cVal;
+  const rotFrac = ice ? 0 : rotationalKEFraction(cNow);
   const hidden = !reveal;
   const label = shortLabel(rk, reveal ? revealId : null);
   return (
@@ -687,13 +699,13 @@ function RacerEnergy({ rk, live, ice, cVal, reveal, revealId }) {
         <span className="text-usna-text text-xs font-medium">{label}</span>
       </div>
       {/* reservoir-drain schematic: PE tank up top forking into two collectors */}
-      <ReservoirDrain col={col} kTrans={kTrans} kRot={kRot} rotFrac={rotFrac} ice={ice} />
+      <ReservoirDrain col={col} kTrans={kTrans} kRot={kRot} rotFrac={rotFrac} ice={ice} budget={budget} />
       <EnergyBars
         items={[
           { label: 'K_trans', value: kTrans, color: col },
           { label: 'K_rot', value: kRot, color: hexWithAlpha(col, 0.4) },
         ]}
-        max={max}
+        max={budget}
         total={total > 0 ? total : undefined}
         height={130}
         unit="J"
@@ -716,10 +728,10 @@ function RacerEnergy({ rk, live, ice, cVal, reveal, revealId }) {
  * sends almost everything into forward motion. On ice the fork is closed off
  * (all flow goes to translation).
  */
-function ReservoirDrain({ col, kTrans, kRot, rotFrac, ice }) {
+function ReservoirDrain({ col, kTrans, kRot, rotFrac, ice, budget }) {
   const canvasRef = useRef(null);
-  const stateRef = useRef({ col, kTrans, kRot, rotFrac, ice });
-  stateRef.current = { col, kTrans, kRot, rotFrac, ice };
+  const stateRef = useRef({ col, kTrans, kRot, rotFrac, ice, budget });
+  stateRef.current = { col, kTrans, kRot, rotFrac, ice, budget };
   // simple phase clock so the flowing droplets animate
   const phaseRef = useRef(0);
 
@@ -738,8 +750,8 @@ function ReservoirDrain({ col, kTrans, kRot, rotFrac, ice }) {
       if (!(dt > 0) || dt > 0.1) dt = 1 / 60;
       phaseRef.current = (phaseRef.current + dt) % 1;
 
-      const { col: c, kTrans: kt, kRot: kr, rotFrac: rf, ice: onIce } = stateRef.current;
-      drawReservoir(ctx, W, H, c, kt, kr, rf, onIce, phaseRef.current);
+      const { col: c, kTrans: kt, kRot: kr, rotFrac: rf, ice: onIce, budget: bud } = stateRef.current;
+      drawReservoir(ctx, W, H, c, kt, kr, rf, onIce, phaseRef.current, bud);
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -758,16 +770,15 @@ function ReservoirDrain({ col, kTrans, kRot, rotFrac, ice }) {
 }
 
 // Canvas painter for one racer's reservoir schematic.
-function drawReservoir(ctx, W, H, col, kTrans, kRot, rotFrac, onIce, phase) {
+function drawReservoir(ctx, W, H, col, kTrans, kRot, rotFrac, onIce, phase, budget) {
   ctx.clearRect(0, 0, W, H);
 
   const total = kTrans + kRot;
-  // Source-tank level is qualitative: we only know live KE, not remaining PE,
-  // so we let the source drain smoothly as collected energy climbs toward a
-  // running cap. The picture is honest about the FORK RATIO (which is exact and
-  // set by c); the source level is illustrative of "draining as it descends."
-  const cap = Math.max(total, 1);
-  const collectedFrac = Math.min(1, total / cap); // →1 once moving
+  // Scale to the full PE budget so the source drains and the collectors fill in
+  // step with the body's descent: collectedFrac equals the fraction of the track
+  // covered, reaching 1 exactly at the finish.
+  const cap = budget && budget > 0 ? budget : Math.max(total, 1);
+  const collectedFrac = Math.min(1, total / cap);
 
   // Layout: source tank (top center), two collectors (bottom left/right).
   const srcX = W / 2, srcTop = 6, srcW = 34, srcH = 22;
@@ -860,14 +871,16 @@ function drawReservoir(ctx, W, H, col, kTrans, kRot, rotFrac, onIce, phase) {
     ctx.fillText(tag, x + colW / 2, colY + colH + 1);
   };
 
-  const tFrac = total > 0 ? kTrans / total : 0;
-  const rFrac = total > 0 ? kRot / total : 0;
+  // fill the collectors against the full budget, so they rise with the descent
+  // and settle at the c-set split (trans = 1/(1+c), rot = c/(1+c)) at the finish
+  const tFrac = kTrans / cap;
+  const rFrac = kRot / cap;
   drawTank(leftX, tFrac, strong, 'trans');
   drawTank(rightX, onIce ? 0 : rFrac, faint, 'rot');
 }
 
 // ── canvas scene: incline + racers rolling down + finish line ───────────────
-function drawScene(ctx, W, H, sim, angleFallback, iceFallback, mysteryIdFallback) {
+function drawScene(ctx, W, H, sim, angleFallback, iceFallback, mysteryIdFallback, finishOrder) {
   if (!ctx) return;
   ctx.clearRect(0, 0, W, H);
 
@@ -960,12 +973,67 @@ function drawScene(ctx, W, H, sim, angleFallback, iceFallback, mysteryIdFallback
     // the mystery racer is drawn as its hidden identity's shape but in amber,
     // so students can *see* it roll like whatever it secretly is.
     const drawKey = rc.key === 'mystery' ? sim.mystId : rc.key;
-    drawBody(ctx, cx, cy, bodyR, drawKey, col, rc.s, rc.r, onIce, dx, dy, rc.key === 'mystery');
+    // soup can: pass how fully the liquid co-rotates so its marker spins up slowly
+    const couple = rc.liquid ? soupCouple(rc.s) : 0;
+    drawBody(ctx, cx, cy, bodyR, drawKey, col, rc.s, rc.r, onIce, dx, dy, rc.key === 'mystery', couple);
   });
+
+  // results box (top-right): the finishing order and times, once the race is over
+  if (!onIce && finishOrder && finishOrder.length > 0) {
+    drawResultsBox(ctx, W, finishOrder, sim.mystId);
+  }
+}
+
+// A compact finish-order panel painted at the top-right of the ramp canvas, so
+// the result lives in the visual and does not reflow the panels below it.
+function drawResultsBox(ctx, W, order, mystId) {
+  const padX = 10, rowH = 19, headH = 22;
+  const boxW = 172;
+  const boxH = headH + order.length * rowH + 8;
+  const x0 = W - boxW - 10, y0 = 10;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(13,19,33,0.9)';
+  ctx.strokeStyle = GRID;
+  ctx.lineWidth = 1;
+  ctx.fillRect(x0, y0, boxW, boxH);
+  ctx.strokeRect(x0, y0, boxW, boxH);
+
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = GOLD;
+  ctx.font = 'bold 12px JetBrains Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('Finish', x0 + padX, y0 + 6);
+  ctx.fillStyle = MUTED;
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('time', x0 + boxW - padX, y0 + 8);
+
+  ctx.textBaseline = 'middle';
+  order.forEach((f, i) => {
+    const ry = y0 + headH + i * rowH + rowH / 2;
+    const col = RACER_COLOR[f.key];
+    const winner = i === 0;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = MUTED;
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.fillText(`${i + 1}`, x0 + padX, ry);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(x0 + padX + 15, ry, 4, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.fillStyle = winner ? '#7FB77E' : TEXT;
+    ctx.font = `${winner ? 'bold ' : ''}11px JetBrains Mono, monospace`;
+    ctx.fillText(shortLabel(f.key, f.key === 'mystery' ? mystId : null), x0 + padX + 25, ry);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = winner ? '#7FB77E' : MUTED;
+    ctx.fillText(`${f.t.toFixed(2)} s`, x0 + boxW - padX, ry);
+  });
+  ctx.restore();
 }
 
 // A rolling (or sliding) body, styled to reveal its mass distribution.
-function drawBody(ctx, cx, cy, R, key, col, s, worldR, onIce, dx, dy, isMystery = false) {
+function drawBody(ctx, cx, cy, R, key, col, s, worldR, onIce, dx, dy, isMystery = false, liquidCouple = 0) {
   // rolling angle: φ = s / r (world). Sliding on ice → no spin.
   const phi = onIce ? 0 : (worldR > 0 ? s / worldR : 0);
 
@@ -1004,6 +1072,31 @@ function drawBody(ctx, cx, cy, R, key, col, s, worldR, onIce, dx, dy, isMystery 
     ctx.arc(0, 0, R, 0, 2 * Math.PI);
     ctx.fill();
     ctx.shadowBlur = 0;
+  } else if (key === 'soup') {
+    // can of liquid: a translucent core inside a thin can wall. The liquid marker
+    // rotates only by the coupling fraction, so early on it stays put (the liquid
+    // has not spun up, effective c tiny) and late in a long race it co-rotates
+    // with the can (effective c approaches the solid cylinder). The white spoke
+    // below always tracks the can wall at the full rolling rate.
+    ctx.fillStyle = hexWithAlpha(col, 0.28);
+    ctx.beginPath();
+    ctx.arc(0, 0, R - 2.5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // liquid marker, partially co-rotating with the can
+    ctx.save();
+    ctx.rotate(phi * liquidCouple);
+    ctx.fillStyle = hexWithAlpha(col, 0.95);
+    ctx.beginPath();
+    ctx.arc(0, R * 0.4, R * 0.18, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
+    // the can wall
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, 2 * Math.PI);
+    ctx.stroke();
   } else {
     // solid sphere: full fill + highlight
     ctx.fillStyle = col;
@@ -1061,7 +1154,7 @@ const INFO = {
   default: {
     title: 'The shape decides the winner — not the size',
     description:
-      'Every rolling body accelerates at a = g sinθ / (1 + c), where c = I / m r² measures how far the mass sits from the axis. Because m and r cancel, the finishing order depends ONLY on c: the solid sphere (c = 2/5) beats the disk (1/2), which beats the hollow shell (2/3), which beats the hoop (1). Crank the mass and radius dials all you want and race again — the order never moves. The reservoir schematic shows why: gravitational PE drains through a fork whose split is fixed by c, and the hoop diverts HALF of its stream into the rotation tank (c/(1+c) = 1/2), starving the translation that carries it downhill, while the sphere pours almost everything into forward motion. The idealization has a limit, too: rolling without slipping needs friction μ_s ≥ (c/(1+c)) tanθ, so on a steep enough ramp even the hoop would begin to skid.',
+      'Every rolling body accelerates at a = g sinθ / (1 + c), where c = I / m r² measures how far the mass sits from the axis. Because m and r cancel, the finishing order depends ONLY on c: the solid sphere (c = 2/5) beats the disk (1/2), which beats the hollow shell (2/3), which beats the hoop (1). Crank the mass and radius dials all you want and race again — the order never moves. The reservoir schematic shows why: gravitational PE drains through a fork whose split is fixed by c, and the hoop diverts HALF of its stream into the rotation tank (c/(1+c) = 1/2), starving the translation that carries it downhill, while the sphere pours almost everything into forward motion. The idealization has a limit, too: rolling without slipping needs friction μ_s ≥ (c/(1+c)) tanθ, so on a steep enough ramp even the hoop would begin to skid. The can of soup is the exception that proves the rule: its liquid barely rotates at first, giving a tiny effective c that wins on any ordinary ramp. Viscosity gradually drags the broth up to speed until it co-rotates like a solid cylinder (c approaches 0.5), so the effective c rises with distance but never exceeds that of the solid cylinder. The can therefore never falls behind the cylinder, and only the solid sphere (c = 0.4) can overtake it. Because the can builds its lead from rest, that overtake lies hundreds of metres down the ramp, which is why the incline length extends so far.',
     equation: String.raw`a = \frac{g\sin\theta}{1 + c}, \qquad c = \frac{I}{m r^{2}}, \qquad \frac{K_{\text{rot}}}{K_{\text{tot}}} = \frac{c}{1+c}, \qquad \mu_s \ge \frac{c}{1+c}\tan\theta`,
   },
   ice: {

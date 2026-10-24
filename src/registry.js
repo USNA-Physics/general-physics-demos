@@ -340,6 +340,20 @@ const courses = [
             ],
             component: lazy(() => import('./courses/sp211/ch10-angular-momentum/AngularMomentum')),
           },
+          {
+            slug: 'precession',
+            dLabel: 'D30b',
+            title: 'Precession',
+            description: 'A spinning top or gyroscope whose symmetry axis sweeps out a horizontal circle rather than falling. The construction is vectorial: the angular momentum L lies along the axis, the gravitational torque τ = r × F is horizontal, and the increment ΔL = τ Δt is perpendicular to L. A step control advances the motion one interval at a time, making the reorientation of L explicit. Increasing the spin rate lowers the precession rate.',
+            moment: 'The weight acts vertically, yet the axis moves horizontally rather than toppling, because ΔL = τ Δt is perpendicular to L.',
+            status: 'built',
+            modes: [
+              { slug: 'top', label: 'Spinning top (L29)' },
+              { slug: 'gyroscope', label: 'Gyroscope (θ=90°)' },
+              { slug: 'applications', label: 'Applications' },
+            ],
+            component: lazy(() => import('./courses/sp211/ch10-angular-momentum/Precession')),
+          },
         ],
       },
       {
@@ -552,6 +566,91 @@ const courses = [
             title: 'Phasor Diagrams',
             description: 'Dynamic vector addition diagrams showing how phasors determine intensity for single-slit and N-slit patterns.',
             component: lazy(() => import('./courses/sp212/ch33-diffraction/Phasors')),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'math',
+    title: 'General Math',
+    subtitle: 'A visual review of the mathematics used in the physics courses',
+    description: 'A geometric review of methods from the Academy mathematics sequence, including vectors, calculus, and differential equations, presented in support of the physics courses that rely on them.',
+    // Not lesson-indexed: no L1-L41 `lessons` map, no `dLabel`. Reference material.
+    chapters: [
+      {
+        slug: 'vectors',
+        number: 1,
+        title: 'Vectors',
+        experiments: [
+          {
+            slug: 'what-they-are',
+            title: 'Vectors and Their Components',
+            description: 'A vector drawn as an arrow, together with a coordinate frame that can be rotated. Rotating the frame changes the components (aₓ, a_y) while the arrow, its length, and its direction remain fixed. The components describe the vector in a chosen frame; they are not the vector itself.',
+            moment: 'Rotating the coordinate axes changes the components while leaving the arrow fixed.',
+            status: 'built',
+            modes: [
+              { slug: 'components', label: 'Components vs. object' },
+              { slug: 'addition', label: 'Addition (basis-free)' },
+            ],
+            component: lazy(() => import('./courses/math/vectors/WhatVectorsAre')),
+          },
+          {
+            slug: 'dot-product',
+            title: 'The Dot Product',
+            description: 'Two vectors with the projection of one onto the other shown as a signed length. The dot product is largest when the vectors are aligned, zero when they are perpendicular, and negative when the angle is obtuse. The geometric form |a||b|cosθ and the component form aₓbₓ + a_yb_y are displayed together and agree for every configuration.',
+            moment: 'The dot product vanishes exactly at a right angle and changes sign beyond it.',
+            status: 'built',
+            modes: [
+              { slug: 'projection', label: 'Projection' },
+              { slug: 'work', label: 'Work W = F·d' },
+            ],
+            component: lazy(() => import('./courses/math/vectors/DotProduct')),
+          },
+          {
+            slug: 'cross-product',
+            title: 'The Cross Product',
+            description: 'The cross product in a rotatable three-dimensional view. Two vectors span a parallelogram, and a × b is the vector perpendicular to that plane whose length equals the area of the parallelogram, with direction given by the right-hand rule. Reversing the order reverses the result; aligning the vectors reduces it to zero. The determinant view resolves the same product into components along the coordinate axes.',
+            moment: 'a × b is perpendicular to the plane of a and b; reversing the order reverses it, and aligning the vectors reduces it to zero.',
+            status: 'built',
+            modes: [
+              { slug: 'area', label: 'Area & direction' },
+              { slug: 'determinant', label: 'Components' },
+            ],
+            component: lazy(() => import('./courses/math/vectors/CrossProduct')),
+          },
+        ],
+      },
+      {
+        slug: 'calculus-1d',
+        number: 2,
+        title: 'Univariate Calculus',
+        experiments: [
+          {
+            slug: 'slope-is-derivative',
+            title: 'The Derivative as Slope',
+            description: 'The derivative at a point realized as the limiting slope of a secant line. As the two points defining the secant approach each other, the secant slope converges to the slope of the tangent. A linked panel traces f′(x) as the point of evaluation moves across the domain, exhibiting the derivative as a function in its own right.',
+            moment: 'As the secant endpoints approach each other, the secant slope converges to the tangent slope.',
+            status: 'built',
+            modes: [
+              { slug: 'tangent', label: 'Secant → tangent' },
+              { slug: 'derivative-function', label: 'Build f′(x)' },
+              { slug: 'motion', label: 'Motion v = dx/dt' },
+            ],
+            component: lazy(() => import('./courses/math/calculus-1d/SlopeIsDerivative')),
+          },
+          {
+            slug: 'area-is-integral',
+            title: 'The Integral as Area',
+            description: 'The definite integral realized as the signed area under a curve, approximated by Riemann sums. Increasing the number of rectangles drives the sum to the exact value; the left, right, and midpoint rules converge to a common limit. A linked panel accumulates A(x) = ∫ₐˣ f as the upper limit varies. Regions below the axis contribute negatively.',
+            moment: 'As the number of rectangles increases the Riemann sum converges to the area, and regions below the axis contribute negatively.',
+            status: 'built',
+            modes: [
+              { slug: 'riemann', label: 'Rectangles → area' },
+              { slug: 'accumulation', label: 'Accumulate A(x)' },
+              { slug: 'motion', label: 'Motion Δx = ∫v dt' },
+            ],
+            component: lazy(() => import('./courses/math/calculus-1d/AreaIsIntegral')),
           },
         ],
       },
