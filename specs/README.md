@@ -45,6 +45,7 @@ The **Moment** is the single counterintuitive prediction the widget is built aro
 | Spec | Target | Kind | Status | Route |
 |---|---|---|---|---|
 | `precession-gyroscope.md` | `sp211` / `ch10-angular-momentum` | demo | Built | `/#/sp211/ch10-angular-momentum/precession` |
+| `chaotic-driven-pendulum.md` | `sp211` / `ch14-oscillations` | demo | Built | `/#/sp211/ch14-oscillations/chaos` |
 | `math-preliminaries-course.md` | course `math` (General Math) | course | Built | `/#/math` |
 | `math-vectors-what-they-are.md` | `math` / `vectors` | widget | Built | `/#/math/vectors/what-they-are` |
 | `math-vectors-dot-product.md` | `math` / `vectors` | widget | Built | `/#/math/vectors/dot-product` |

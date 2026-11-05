@@ -419,6 +419,22 @@ const courses = [
             ],
             component: lazy(() => import('./courses/sp211/ch14-oscillations/ShmExplorer')),
           },
+          {
+            slug: 'chaos',
+            dLabel: 'D36',
+            title: 'Chaotic Pendulum Explorer',
+            description: 'The driven damped pendulum θ″ + (1/Q)θ′ + sinθ = A·cos(ω_D t). Keep the full sin θ, add damping and a periodic push, and the most predictable system in the course becomes chaotic. Drive presets walk the period-doubling route; a twin-pendulum mode exposes sensitive dependence; Poincaré, bifurcation, and fractal-basin modes reveal the hidden structure.',
+            moment: 'Two pendulums obeying identical laws, released a hair apart, track for a few swings then diverge completely — nothing is random, yet the far future is unpredictable.',
+            status: 'built',
+            modes: [
+              { slug: 'run', label: 'Run (period-doubling)' },
+              { slug: 'divergence', label: 'Divergence (twins)' },
+              { slug: 'poincare', label: 'Poincaré (attractor)' },
+              { slug: 'bifurcation', label: 'Bifurcation cascade' },
+              { slug: 'basins', label: 'Fractal basins' },
+            ],
+            component: lazy(() => import('./courses/sp211/ch14-oscillations/ChaoticPendulum')),
+          },
         ],
       },
       {
