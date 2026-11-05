@@ -97,6 +97,12 @@ export default function CrossProduct({ mode = 'area' }) {
   const theta = magA > 1e-6 && magB > 1e-6
     ? Math.acos(Math.max(-1, Math.min(1, dot3(av, bv) / (magA * magB)))) : 0;
 
+  // in-plane polar form of each factor, driving the length / angle sliders
+  const aR = Math.hypot(a.x, a.y);
+  const bR = Math.hypot(b.x, b.y);
+  const aPhi = norm360(Math.atan2(a.y, a.x) * DEG);
+  const bPhi = norm360(Math.atan2(b.y, b.x) * DEG);
+
   // special-case classification (planar only, so the two perpendicular
   // orientations can be distinguished by the sign of the result)
   let special = null;
@@ -127,6 +133,12 @@ export default function CrossProduct({ mode = 'area' }) {
     setA({ x: va[0], y: va[1] }); setAZ(va[2]);
     setB({ x: vb[0], y: vb[1] }); setBZ(vb[2]);
   };
+  // length / angle setters: changing one holds the other, from the current in-plane vector
+  const clampXY = (v) => Math.max(-3, Math.min(3, v));
+  const setAlen = (r) => { const ph = Math.atan2(a.y, a.x); setA({ x: clampXY(+(r * Math.cos(ph)).toFixed(4)), y: clampXY(+(r * Math.sin(ph)).toFixed(4)) }); };
+  const setAang = (deg) => { const r = Math.hypot(a.x, a.y); setA({ x: clampXY(+(r * Math.cos(deg * RAD)).toFixed(4)), y: clampXY(+(r * Math.sin(deg * RAD)).toFixed(4)) }); };
+  const setBlen = (r) => { const ph = Math.atan2(b.y, b.x); setB({ x: clampXY(+(r * Math.cos(ph)).toFixed(4)), y: clampXY(+(r * Math.sin(ph)).toFixed(4)) }); };
+  const setBang = (deg) => { const r = Math.hypot(b.x, b.y); setB({ x: clampXY(+(r * Math.cos(deg * RAD)).toFixed(4)), y: clampXY(+(r * Math.sin(deg * RAD)).toFixed(4)) }); };
   const setAz = (v) => { azRef.current = v; setAzDeg(v); };
   const setEl = (v) => { elRef.current = v; setElDeg(v); };
 
@@ -374,7 +386,8 @@ export default function CrossProduct({ mode = 'area' }) {
       <ControlPanel onReset={reset}>
         <p className="text-usna-muted text-xs mb-3">
           Drag the <span style={{ color: BLUE }}>a</span> and{' '}
-          <span style={{ color: GREEN }}>b</span> tips within the plane. The{' '}
+          <span style={{ color: GREEN }}>b</span> tips within the plane, or set each vector's
+          length and angle with the sliders below. The{' '}
           <span style={{ color: GOLD }}>{resLabel}</span> vector is perpendicular to it.
           Drag the background to rotate the view.
         </p>
@@ -401,8 +414,18 @@ export default function CrossProduct({ mode = 'area' }) {
           </div>
         </div>
 
-        <Slider label="a·ẑ (out of plane)" value={aZ} min={-2.5} max={2.5} step={0.1} unit="" onChange={setAZ} />
-        <Slider label="b·ẑ (out of plane)" value={bZ} min={-2.5} max={2.5} step={0.1} unit="" onChange={setBZ} />
+        <div className="mb-3 border-t border-usna-grid pt-3">
+          <div className="text-xs mb-1.5 font-semibold" style={{ color: BLUE }}>Vector a</div>
+          <Slider label="length (in plane)" value={+aR.toFixed(2)} min={0} max={3} step={0.05} unit="" onChange={setAlen} />
+          <Slider label="angle (in plane)" value={Math.round(aPhi)} min={0} max={360} step={1} unit="°" onChange={setAang} />
+          <Slider label="a·ẑ (out of plane)" value={aZ} min={-2.5} max={2.5} step={0.1} unit="" onChange={setAZ} />
+        </div>
+        <div className="mb-1">
+          <div className="text-xs mb-1.5 font-semibold" style={{ color: GREEN }}>Vector b</div>
+          <Slider label="length (in plane)" value={+bR.toFixed(2)} min={0} max={3} step={0.05} unit="" onChange={setBlen} />
+          <Slider label="angle (in plane)" value={Math.round(bPhi)} min={0} max={360} step={1} unit="°" onChange={setBang} />
+          <Slider label="b·ẑ (out of plane)" value={bZ} min={-2.5} max={2.5} step={0.1} unit="" onChange={setBZ} />
+        </div>
 
         {/* Camera */}
         <div className="mt-2 border-t border-usna-grid pt-3">
