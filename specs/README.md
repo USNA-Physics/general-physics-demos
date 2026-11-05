@@ -52,8 +52,10 @@ The **Moment** is the single counterintuitive prediction the widget is built aro
 | `math-vectors-cross-product.md` | `math` / `vectors` | widget | Built | `/#/math/vectors/cross-product` |
 | `math-calculus-slope-is-derivative.md` | `math` / `calculus-1d` | widget | Built | `/#/math/calculus-1d/slope-is-derivative` |
 | `math-calculus-area-is-integral.md` | `math` / `calculus-1d` | widget | Built | `/#/math/calculus-1d/area-is-integral` |
+| `math-fourier-transform.md` | `math` / `fourier` | widget | Built | `/#/math/fourier/fourier-transform` |
 
 **Planned / not yet specced** (request when wanted): vector addition & change-of-basis
 (may fold into *what-they-are*), the Fundamental Theorem of Calculus (ties slope ↔ area),
 the determinant / triple-product form of the cross product, complex numbers & phasors
-(for SP212), partial derivatives & gradient (SP212+).
+(for SP212; a prerequisite the Fourier *epicycles* mode leans on), partial derivatives &
+gradient (SP212+).

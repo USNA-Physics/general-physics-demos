@@ -590,8 +590,8 @@ const courses = [
   {
     id: 'math',
     title: 'General Math',
-    subtitle: 'A visual review of the mathematics used in the physics courses',
-    description: 'A geometric review of methods from the Academy mathematics sequence, including vectors, calculus, and differential equations, presented in support of the physics courses that rely on them.',
+    subtitle: 'Mathematical methods for the physics courses',
+    description: 'Algebra, calculus, and functional analysis.',
     // Not lesson-indexed: no L1-L41 `lessons` map, no `dLabel`. Reference material.
     chapters: [
       {
@@ -667,6 +667,27 @@ const courses = [
               { slug: 'motion', label: 'Motion Δx = ∫v dt' },
             ],
             component: lazy(() => import('./courses/math/calculus-1d/AreaIsIntegral')),
+          },
+        ],
+      },
+      {
+        slug: 'fourier',
+        number: 3,
+        title: 'The Fourier Transform',
+        experiments: [
+          {
+            slug: 'fourier-transform',
+            title: 'The Fourier Transform',
+            description: 'A periodic signal and its two-sided complex spectrum, shown as one object. The spectrum mode rebuilds x(t) live from draggable coefficients c_n; the synthesis mode adds harmonics one at a time, converging to the target and exposing the Gibbs overshoot at a jump; the epicycles mode renders the complex series as nested rotating circles whose pen traces a closed 2-D shape (up to the USNA crest); the continuous mode takes the period to infinity, replacing the line spectrum with the Fourier integral and the uncertainty tradeoff. A single mode is simple harmonic motion.',
+            moment: 'A sum of plain sinusoids — each just a circle turning at a steady rate — reproduces any signal, from a square wave to the USNA crest, exactly in the limit.',
+            status: 'built',
+            modes: [
+              { slug: 'spectrum', label: 'Time ↔ frequency' },
+              { slug: 'synthesis', label: 'Build from N tones' },
+              { slug: 'epicycles', label: 'Circles in circles' },
+              { slug: 'continuous', label: 'Continuous (aperiodic)' },
+            ],
+            component: lazy(() => import('./courses/math/fourier/FourierTransform')),
           },
         ],
       },
