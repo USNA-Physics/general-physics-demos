@@ -593,6 +593,14 @@ const courses = [
     subtitle: 'Mathematical methods for the physics courses',
     description: 'Algebra, calculus, and functional analysis.',
     // Not lesson-indexed: no L1-L41 `lessons` map, no `dLabel`. Reference material.
+    // Chapters are organized into branches of mathematics. groupMode:'sections'
+    // renders them under group headings (all visible), rather than as filter pills.
+    groupMode: 'sections',
+    groups: [
+      { slug: 'algebra', label: 'Algebra', description: 'Vectors and the operations that act on them.', chapterSlugs: ['vectors'] },
+      { slug: 'geometry', label: 'Geometry', description: 'Curves and shapes, and the equations that describe them.', chapterSlugs: ['conics'] },
+      { slug: 'analysis', label: 'Analysis', description: 'Limits, derivatives, integrals, and the frequency domain.', chapterSlugs: ['calculus-1d', 'fourier'] },
+    ],
     chapters: [
       {
         slug: 'vectors',
@@ -639,7 +647,7 @@ const courses = [
       },
       {
         slug: 'calculus-1d',
-        number: 2,
+        number: 3,
         title: 'Univariate Calculus',
         experiments: [
           {
@@ -672,7 +680,7 @@ const courses = [
       },
       {
         slug: 'fourier',
-        number: 3,
+        number: 4,
         title: 'The Fourier Transform',
         experiments: [
           {
@@ -688,6 +696,26 @@ const courses = [
               { slug: 'continuous', label: 'Continuous (aperiodic)' },
             ],
             component: lazy(() => import('./courses/math/fourier/FourierTransform')),
+          },
+        ],
+      },
+      {
+        slug: 'conics',
+        number: 2,
+        title: 'Conic Sections',
+        experiments: [
+          {
+            slug: 'conic-sections',
+            title: 'Conic Sections',
+            description: 'The circle, ellipse, parabola, and hyperbola as the plane sections of one double cone. The slice mode shows the 3-D cone cut by a tiltable plane; the projection mode draws the section in true shape with its foci, directrix, asymptotes, and eccentricity; the classification mode ties the cut to the general second-degree equation, where the discriminant B²−4AC fixes the type and the xy term only rotates the curve.',
+            moment: 'Tilt one cutting plane and the section passes smoothly from ellipse to parabola to hyperbola — the very instant it parallels a cone generator, the equation\'s discriminant B²−4AC crosses zero.',
+            status: 'built',
+            modes: [
+              { slug: 'slice', label: 'Slice the cone (3-D)' },
+              { slug: 'projection', label: 'True shape (2-D)' },
+              { slug: 'classification', label: 'Equation & discriminant' },
+            ],
+            component: lazy(() => import('./courses/math/conics/ConicSections')),
           },
         ],
       },

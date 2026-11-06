@@ -36,6 +36,49 @@ export default function CoursePage() {
 
   const hasGroups = course.groups && course.groups.length > 0;
   const hasLessons = course.lessons && course.lessons.length > 0;
+  // Section mode renders chapters under group headings (all visible); otherwise
+  // groups act as filter pills (the sp211 behavior).
+  const useSections = hasGroups && course.groupMode === 'sections';
+
+  const renderChapter = (chapter) => {
+    const isExpanded = expandedChapters.has(chapter.slug);
+    const expCount = chapter.experiments.length;
+    return (
+      <div key={chapter.slug} className="bg-usna-card border border-usna-grid rounded-lg overflow-hidden">
+        <div className="flex items-center gap-3 p-4">
+          <button
+            onClick={() => toggleChapter(chapter.slug)}
+            className="text-usna-muted hover:text-usna-gold transition-colors shrink-0"
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+              <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+            </svg>
+          </button>
+          <div className="flex-1 min-w-0">
+            <Link to={`/${courseId}/${chapter.slug}`} className="text-usna-text font-semibold hover:text-usna-gold transition-colors">
+              Chapter {chapter.number}: {chapter.title}
+            </Link>
+            <span className="text-usna-muted text-xs ml-2">{expCount} demo{expCount !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+        {isExpanded && (
+          <div className="px-4 pb-4 pt-0 grid gap-2 sm:grid-cols-2">
+            {chapter.experiments.map((exp) => (
+              <Link key={exp.slug} to={`/${courseId}/${chapter.slug}/${exp.slug}`} className="group block bg-usna-deep border border-usna-grid rounded p-3 hover:border-usna-gold transition-colors">
+                <h3 className="text-xs font-medium text-usna-gold group-hover:text-usna-gold-light flex items-center gap-1.5">
+                  {exp.dLabel && <span className="font-mono text-[10px] text-usna-muted">{exp.dLabel}</span>}
+                  {exp.title}
+                  {exp.status === 'stub' && <span className="text-[9px] uppercase tracking-wide text-usna-muted">· soon</span>}
+                </h3>
+                {exp.description && <p className="text-usna-muted text-xs mt-0.5 line-clamp-2">{exp.description}</p>}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -63,8 +106,8 @@ export default function CoursePage() {
         <LessonIndex courseId={courseId} lessons={course.lessons} />
       ) : (
         <>
-          {/* Topic group pills */}
-          {hasGroups && (
+          {/* Topic group pills (filter mode — not used when groups render as sections) */}
+          {hasGroups && !useSections && (
             <div className="flex flex-wrap gap-2 mb-6">
               <Link
                 to={`/${courseId}`}
@@ -92,11 +135,11 @@ export default function CoursePage() {
             </div>
           )}
 
-          {activeGroup && activeGroup.description && (
+          {activeGroup && activeGroup.description && !useSections && (
             <p className="text-usna-muted text-sm mb-6 italic">{activeGroup.description}</p>
           )}
 
-          {visibleChapters.length === 0 ? (
+          {(useSections ? course.chapters.length === 0 : visibleChapters.length === 0) ? (
             <p className="text-usna-muted italic">No demos yet — check back soon.</p>
           ) : (
             <>
@@ -111,68 +154,27 @@ export default function CoursePage() {
                 </button>
               </div>
 
-              <div className="space-y-3">
-                {visibleChapters.map((chapter) => {
-                  const isExpanded = expandedChapters.has(chapter.slug);
-                  const expCount = chapter.experiments.length;
-
-                  return (
-                    <div key={chapter.slug} className="bg-usna-card border border-usna-grid rounded-lg overflow-hidden">
-                      {/* Chapter header — clickable to expand, with link to chapter page */}
-                      <div className="flex items-center gap-3 p-4">
-                        <button
-                          onClick={() => toggleChapter(chapter.slug)}
-                          className="text-usna-muted hover:text-usna-gold transition-colors shrink-0"
-                          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                            className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                          >
-                            <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-
-                        <div className="flex-1 min-w-0">
-                          <Link
-                            to={`/${courseId}/${chapter.slug}`}
-                            className="text-usna-text font-semibold hover:text-usna-gold transition-colors"
-                          >
-                            Chapter {chapter.number}: {chapter.title}
-                          </Link>
-                          <span className="text-usna-muted text-xs ml-2">
-                            {expCount} demo{expCount !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Expanded experiment list */}
-                      {isExpanded && (
-                        <div className="px-4 pb-4 pt-0 grid gap-2 sm:grid-cols-2">
-                          {chapter.experiments.map((exp) => (
-                            <Link
-                              key={exp.slug}
-                              to={`/${courseId}/${chapter.slug}/${exp.slug}`}
-                              className="group block bg-usna-deep border border-usna-grid rounded p-3 hover:border-usna-gold transition-colors"
-                            >
-                              <h3 className="text-xs font-medium text-usna-gold group-hover:text-usna-gold-light flex items-center gap-1.5">
-                                {exp.dLabel && <span className="font-mono text-[10px] text-usna-muted">{exp.dLabel}</span>}
-                                {exp.title}
-                                {exp.status === 'stub' && <span className="text-[9px] uppercase tracking-wide text-usna-muted">· soon</span>}
-                              </h3>
-                              {exp.description && (
-                                <p className="text-usna-muted text-xs mt-0.5 line-clamp-2">{exp.description}</p>
-                              )}
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              {useSections ? (
+                <div className="space-y-6">
+                  {course.groups.map((group) => {
+                    const chs = group.chapterSlugs
+                      .map((s) => course.chapters.find((c) => c.slug === s))
+                      .filter(Boolean);
+                    if (chs.length === 0) return null;
+                    return (
+                      <section key={group.slug}>
+                        <h2 className="text-xs font-semibold uppercase tracking-wider text-usna-gold mb-1">{group.label}</h2>
+                        {group.description && (
+                          <p className="text-usna-muted text-xs mb-3 italic">{group.description}</p>
+                        )}
+                        <div className="space-y-3">{chs.map(renderChapter)}</div>
+                      </section>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-3">{visibleChapters.map(renderChapter)}</div>
+              )}
             </>
           )}
         </>

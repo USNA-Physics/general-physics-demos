@@ -53,6 +53,7 @@ The **Moment** is the single counterintuitive prediction the widget is built aro
 | `math-calculus-slope-is-derivative.md` | `math` / `calculus-1d` | widget | Built | `/#/math/calculus-1d/slope-is-derivative` |
 | `math-calculus-area-is-integral.md` | `math` / `calculus-1d` | widget | Built | `/#/math/calculus-1d/area-is-integral` |
 | `math-fourier-transform.md` | `math` / `fourier` | widget | Built | `/#/math/fourier/fourier-transform` |
+| `math-conic-sections.md` | `math` / `conics` | widget | Built | `/#/math/conics/conic-sections` |
 
 **Planned / not yet specced** (request when wanted): vector addition & change-of-basis
 (may fold into *what-they-are*), the Fundamental Theorem of Calculus (ties slope ↔ area),
