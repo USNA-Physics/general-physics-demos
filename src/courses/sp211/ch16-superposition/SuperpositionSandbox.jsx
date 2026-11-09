@@ -82,7 +82,8 @@ export default function SuperpositionSandbox({ mode = 'beats' }) {
 // The sliders are REAL audio frequencies (Hz) in a comfortable listening band, so
 // the presets (400 & 403, 400 & 600) are literal and the two-oscillator sum below
 // is honest. audioHz is the identity: no transpose is needed in this band.
-const BEAT_FMIN = 200, BEAT_FMAX = 700;
+const BEAT_FMIN = 200, BEAT_FMAX = 600;   // base-frequency slider range
+const DETUNE_MAX = 20;                     // fine detune slider range, ±Hz (presets reach wider gaps)
 const BEAT_DEFAULTS = { f1: 300, f2: 303, volume: 0.14, delta: 0, visSpeed: 0.5 };
 const audioHz = (f) => f;
 const EPS_EQUAL = 0.5;    // |f1−f2| below this counts as the same frequency
@@ -287,13 +288,15 @@ function BeatsMode() {
     // scrolling with the clock. The band pinches to zero at every beat node, one
     // every 1/Δf seconds, so widening Δf visibly packs the throbs closer together.
     // Equal frequencies give a steady band at the interference level 2A|cos(δ/2)|.
-    const drawScope = (df, dlt, eq, nowT) => {
+    const drawScope = (df, dlt, eq, nowT, spd) => {
       scopeCtx.clearRect(0, 0, scopeW, scopeH);
       scopeCtx.fillStyle = BG; scopeCtx.fillRect(0, 0, scopeW, scopeH);
       scopeCtx.strokeStyle = GRID; scopeCtx.lineWidth = 1;
       scopeCtx.beginPath(); scopeCtx.moveTo(0, scopeH / 2); scopeCtx.lineTo(scopeW, scopeH / 2); scopeCtx.stroke();
       const amp = scopeH * 0.42;
-      const envAt = (t) => (eq ? Math.abs(Math.cos(0.5 * dlt)) : Math.abs(Math.cos(Math.PI * df * t)));
+      // envelope scrolls at df·spd so the slow-motion knob calms it; the readout
+      // still reports the true beat period 1/Δf.
+      const envAt = (t) => (eq ? Math.abs(Math.cos(0.5 * dlt)) : Math.abs(Math.cos(Math.PI * df * spd * t)));
       const tAt = (x) => nowT - SCOPE_WIN * (1 - x / scopeW);
       // filled band between the ±envelope rails
       scopeCtx.beginPath();
@@ -416,8 +419,9 @@ function BeatsMode() {
       drawTrace(ySum, GOLD, 2.8, 1);
       ctx.shadowBlur = 0;
 
-      // ── oscilloscope: the real-time loudness envelope of the two true tones ────
-      if (scopeCtx) drawScope(Math.abs(fA - fB), deltaRef.current, equal, sim);
+      // ── oscilloscope: the loudness envelope of the two true tones, slowed to the
+      // same slow-motion factor as the canvas so it scrolls at a watchable pace ───
+      if (scopeCtx) drawScope(Math.abs(fA - fB), deltaRef.current, equal, sim, spd);
 
       if (readoutAccum > 0.12) {
         readoutAccum = 0;
@@ -469,8 +473,20 @@ function BeatsMode() {
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <ControlPanel onReset={reset}>
-        <Slider label="Frequency f₁" value={Math.round(f1)} min={BEAT_FMIN} max={BEAT_FMAX} step={1} unit="Hz" onChange={setF1} />
-        <Slider label="Frequency f₂" value={Math.round(f2)} min={BEAT_FMIN} max={BEAT_FMAX} step={1} unit="Hz" onChange={setF2} />
+        <Slider
+          label="Base frequency f₁"
+          value={Math.round(f1)} min={BEAT_FMIN} max={BEAT_FMAX} step={1} unit="Hz"
+          onChange={(v) => { const d = f2 - f1; setF1(v); setF2(v + d); }}
+        />
+        <Slider
+          label="Detune Δf = f₂ − f₁"
+          value={Number(Math.max(-DETUNE_MAX, Math.min(DETUNE_MAX, f2 - f1)).toFixed(1))}
+          min={-DETUNE_MAX} max={DETUNE_MAX} step={0.2} unit="Hz"
+          onChange={(d) => setF2(f1 + d)}
+        />
+        <p className="text-usna-muted text-xs -mt-2 mb-3 leading-snug">
+          Fine detune for beats. For a wide gap or a chord, use the presets below.
+        </p>
 
         <div className="mb-3">
           <div className="text-usna-text text-sm font-medium mb-2">Presets (predict, then listen)</div>
@@ -580,7 +596,7 @@ function BeatsMode() {
         <div ref={scopeWrapRef} className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden relative" style={{ height: 120, background: BG }}>
           <canvas ref={scopeCanvasRef} className="block" />
           <div className="absolute top-1.5 left-3 text-xs font-mono text-usna-gold/80 pointer-events-none">
-            Beat envelope · loudness of the two tones vs time (real-time, matches the audio)
+            Beat envelope · loudness vs time · node spacing = beat period 1/Δf (slowed with the speed knob)
           </div>
         </div>
         <InfoPanel {...(moving ? INFO.beatsMoving : INFO.beats)} />
