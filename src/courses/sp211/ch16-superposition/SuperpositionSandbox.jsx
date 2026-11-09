@@ -242,7 +242,8 @@ function BeatsMode() {
     // true beat period 1/Δf, so it tracks Δf and matches what the ear hears (it is
     // driven by the real frequencies, not the slow-motion caricature).
     let scopeCtx, scopeW, scopeH;
-    const SCOPE_WIN = 4;                 // seconds of the loudness trace shown
+    const SCOPE_WIN = 7;                 // seconds of the loudness trace shown (wider = slower scroll)
+    const SCOPE_SLOW = 0.6;              // extra calming of the throb rate beyond the speed knob
 
     const resize = () => {
       W = wrap.clientWidth;
@@ -294,9 +295,9 @@ function BeatsMode() {
       scopeCtx.strokeStyle = GRID; scopeCtx.lineWidth = 1;
       scopeCtx.beginPath(); scopeCtx.moveTo(0, scopeH / 2); scopeCtx.lineTo(scopeW, scopeH / 2); scopeCtx.stroke();
       const amp = scopeH * 0.42;
-      // envelope scrolls at df·spd so the slow-motion knob calms it; the readout
-      // still reports the true beat period 1/Δf.
-      const envAt = (t) => (eq ? Math.abs(Math.cos(0.5 * dlt)) : Math.abs(Math.cos(Math.PI * df * spd * t)));
+      // envelope scrolls at df·spd·SCOPE_SLOW so the slow-motion knob calms it; the
+      // readout still reports the true beat period 1/Δf.
+      const envAt = (t) => (eq ? Math.abs(Math.cos(0.5 * dlt)) : Math.abs(Math.cos(Math.PI * df * spd * SCOPE_SLOW * t)));
       const tAt = (x) => nowT - SCOPE_WIN * (1 - x / scopeW);
       // filled band between the ±envelope rails
       scopeCtx.beginPath();
