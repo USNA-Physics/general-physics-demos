@@ -466,6 +466,21 @@ const courses = [
             status: 'built',
             component: lazy(() => import('./courses/sp211/ch15-waves/DopplerWavefront')),
           },
+          {
+            slug: 'moving-medium',
+            dLabel: 'D39b',
+            title: 'Sound in a Moving or Structured Medium',
+            description: 'The advanced companion to the Doppler visualizer. The medium itself moves (a wind) or is layered (a sound-speed profile), and a fan of rays is traced through it, each bending toward lower speed, opening shadow zones (gray) and convergence zones (gold). Uniform mode treats a wind as an effective sound speed that cancels from the pitch. The wind-shear, thermal, and ocean-channel modes bend sound over the horizon, open the sonar afternoon-effect shadow, and trap sound in the deep SOFAR channel.',
+            moment: 'The same source is loud for miles downwind yet silent a short distance upwind. A wind that increases with height refracts the rays downward on one side and upward on the other.',
+            status: 'built',
+            modes: [
+              { slug: 'uniform', label: 'Uniform wind (Doppler)' },
+              { slug: 'wind-shear', label: 'Wind shear (refraction)' },
+              { slug: 'thermal', label: 'Thermal (day/night)' },
+              { slug: 'ocean-channel', label: 'Ocean SOFAR channel' },
+            ],
+            component: lazy(() => import('./courses/sp211/ch15-waves/MovingMedium')),
+          },
         ],
       },
       {
