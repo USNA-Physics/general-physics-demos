@@ -117,6 +117,8 @@ const K_DETUNE = 0.12;
 function BeatsMode() {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
+  const scopeWrapRef = useRef(null);   // oscilloscope strip: displacement at a probe vs time
+  const scopeCanvasRef = useRef(null);
 
   const [f1, setF1] = useState(BEAT_DEFAULTS.f1);
   const [f2, setF2] = useState(BEAT_DEFAULTS.f2);
@@ -231,11 +233,22 @@ function BeatsMode() {
     const padX = 24;
     const xs = makeXs(BEAT_XMAX, BEAT_SAMPLES);
     let readoutAccum = 0;
+    // Accumulated phase of each component. Advancing phase incrementally (rather
+    // than evaluating ω·t with the absolute clock) keeps the wave continuous when
+    // ω changes, so moving a slider no longer snaps the pattern to a new phase.
+    let phiA = 0, phiB = 0;
+    // oscilloscope ring buffer: {t, y, e} = time, probe displacement, envelope
+    let scopeCtx, scopeW, scopeH;
+    const scopeBuf = [];
+    const SCOPE_WIN = 8;                 // seconds of history shown
+    const X_PROBE = BEAT_XMAX * 0.5;     // probe point (centre of the window)
 
     const resize = () => {
       W = wrap.clientWidth;
       H = wrap.clientHeight;
       ctx = setupCanvas(canvas, W, H);
+      const sw = scopeWrapRef.current, sc = scopeCanvasRef.current;
+      if (sw && sc) { scopeW = sw.clientWidth; scopeH = sw.clientHeight; scopeCtx = setupCanvas(sc, scopeW, scopeH); }
     };
 
     const drawTrace = (y, color, width, alpha) => {
@@ -269,6 +282,34 @@ function BeatsMode() {
       ctx.globalAlpha = 1;
     };
 
+    // oscilloscope: scroll the probe displacement (bold) with its envelope rails
+    // (faint, dashed) — the rails trace a slow wave at exactly the beat frequency.
+    const drawScope = (maxAmp) => {
+      scopeCtx.clearRect(0, 0, scopeW, scopeH);
+      scopeCtx.fillStyle = BG; scopeCtx.fillRect(0, 0, scopeW, scopeH);
+      scopeCtx.strokeStyle = GRID; scopeCtx.lineWidth = 1;
+      scopeCtx.beginPath(); scopeCtx.moveTo(0, scopeH / 2); scopeCtx.lineTo(scopeW, scopeH / 2); scopeCtx.stroke();
+      if (scopeBuf.length >= 2 && maxAmp > 0) {
+        const t1 = scopeBuf[scopeBuf.length - 1].t, t0 = t1 - SCOPE_WIN, amp = scopeH * 0.42;
+        const X = (t) => ((t - t0) / SCOPE_WIN) * scopeW;
+        const Y = (v) => scopeH / 2 - (v / maxAmp) * amp;
+        scopeCtx.strokeStyle = 'rgba(197,183,131,0.4)'; scopeCtx.lineWidth = 1.2; scopeCtx.setLineDash([4, 4]);
+        [1, -1].forEach((s) => {
+          scopeCtx.beginPath();
+          scopeBuf.forEach((p, i) => { const x = X(p.t), y = Y(s * p.e); i ? scopeCtx.lineTo(x, y) : scopeCtx.moveTo(x, y); });
+          scopeCtx.stroke();
+        });
+        scopeCtx.setLineDash([]);
+        scopeCtx.strokeStyle = GOLD; scopeCtx.lineWidth = 1.8;
+        scopeCtx.beginPath();
+        scopeBuf.forEach((p, i) => { const x = X(p.t), y = Y(p.y); i ? scopeCtx.lineTo(x, y) : scopeCtx.moveTo(x, y); });
+        scopeCtx.stroke();
+      }
+      scopeCtx.fillStyle = MUTED; scopeCtx.font = '10px ui-monospace, monospace';
+      scopeCtx.textAlign = 'right'; scopeCtx.fillText(`${SCOPE_WIN}s window →  now`, scopeW - 6, scopeH - 6);
+      scopeCtx.textAlign = 'left';
+    };
+
     const draw = (now) => {
       if (sim === undefined) { sim = 0; lastNow = now; }
       let dt = (now - lastNow) / 1000;
@@ -297,10 +338,17 @@ function BeatsMode() {
       const omA = omega_of(fVisA) * BEAT_SPEED * spd;
       const omB = omega_of(fVisB) * BEAT_SPEED * spd;
 
+      // advance each component's phase incrementally (continuous across ω changes)
+      phiA += omA * dt;
+      phiB += omB * dt;
+      if (equal) phiB = phiA;   // lock so the relative phase is exactly δ (clean interference)
+
       // relative phase δ drives the equal-frequency sum from double-height to flat
-      const phaseB = equal && !isMoving ? deltaRef.current : 0;
-      const wA = { A: ampPx, k: kA, omega: omA, phase: 0 };
-      const wB = { A: ampPx, k: kB, omega: omB, phase: phaseB };
+      const dStatic = equal && !isMoving ? deltaRef.current : 0;
+      // bake the accumulated phase into each wave's phase offset (ω = 0, t = 0),
+      // so superpose draws sin(kx − φ) with the continuous φ
+      const wA = { A: ampPx, k: kA, omega: 0, phase: -phiA };
+      const wB = { A: ampPx, k: kB, omega: 0, phase: -phiB + dStatic };
 
       ctx.clearRect(0, 0, W, H);
 
@@ -308,9 +356,9 @@ function BeatsMode() {
       ctx.strokeStyle = GRID; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(padX, H / 2); ctx.lineTo(W - padX, H / 2); ctx.stroke();
 
-      const yA = superpose([wA], xs, sim);
-      const yB = superpose([wB], xs, sim);
-      const ySum = superpose([wA, wB], xs, sim);
+      const yA = superpose([wA], xs, 0);
+      const yB = superpose([wB], xs, 0);
+      const ySum = superpose([wA, wB], xs, 0);
 
       if (showRef.current) {
         drawTrace(yA, BLUE, 1.6, 0.5);
@@ -326,18 +374,19 @@ function BeatsMode() {
       //     cos=0 and they TRAVEL at v_g = Δω/Δk.
       const dk = kA - kB;
       const dOm = omA - omB;
+      const dPhi = phiA - phiB;   // accumulated phase difference (= 0 when locked equal)
 
       if (isMoving && Math.abs(dk) > 1e-9) {
         const envFn = (s) => (x) =>
-          s * 2 * ampPx * Math.abs(Math.cos(0.5 * dk * x - 0.5 * dOm * sim));
+          s * 2 * ampPx * Math.abs(Math.cos(0.5 * dk * x - 0.5 * dPhi));
         // draw both envelope rails as smooth curves
         drawFn(envFn(1), 'rgba(197,183,131,0.32)', 1.4, 1, [5, 6]);
         drawFn(envFn(-1), 'rgba(197,183,131,0.32)', 1.4, 1, [5, 6]);
         // mark the traveling beat nodes (envelope zeros) with small ticks
         ctx.fillStyle = 'rgba(91,155,213,0.9)';
         for (let m = -6; m <= 12; m++) {
-          // cos(Δk x/2 − Δω t/2) = 0  →  Δk x/2 − Δω t/2 = (m+½)π
-          const x = (2 / dk) * ((m + 0.5) * Math.PI + 0.5 * dOm * sim);
+          // cos(Δk x/2 − ΔΦ/2) = 0  →  Δk x/2 − ΔΦ/2 = (m+½)π
+          const x = (2 / dk) * ((m + 0.5) * Math.PI + 0.5 * dPhi);
           if (x < 0 || x > BEAT_XMAX) continue;
           const px = padX + (x / BEAT_XMAX) * (W - 2 * padX);
           ctx.beginPath(); ctx.arc(px, H / 2, 3, 0, 2 * Math.PI); ctx.fill();
@@ -346,7 +395,7 @@ function BeatsMode() {
         // classic temporal envelope: flat rails that breathe up/down in time. The
         // phase term folds in δ for the equal-frequency case, so the rails collapse
         // to zero at δ = π (the sum is flat and the tones cancel).
-        const envAmp = Math.abs(2 * ampPx * Math.cos(0.5 * (dOm * sim + phaseB)));
+        const envAmp = Math.abs(2 * ampPx * Math.cos(0.5 * (dPhi + dStatic)));
         ctx.strokeStyle = 'rgba(197,183,131,0.28)';
         ctx.lineWidth = 1; ctx.setLineDash([5, 6]);
         [1, -1].forEach((s) => {
@@ -363,6 +412,21 @@ function BeatsMode() {
       drawTrace(ySum, GOLD, 2.8, 1);
       ctx.shadowBlur = 0;
 
+      // ── oscilloscope: record the displacement at the probe column vs time ──────
+      const probeIdx = Math.min(xs.length - 1, Math.round((X_PROBE / BEAT_XMAX) * (xs.length - 1)));
+      const envProbe = isMoving
+        ? Math.abs(2 * ampPx * Math.cos(0.5 * dk * X_PROBE - 0.5 * dPhi))
+        : Math.abs(2 * ampPx * Math.cos(0.5 * (dPhi + dStatic)));
+      scopeBuf.push({ t: sim, y: ySum[probeIdx], e: envProbe });
+      while (scopeBuf.length && scopeBuf[0].t < sim - SCOPE_WIN) scopeBuf.shift();
+      if (scopeCtx) drawScope(2 * ampPx);
+      // mark the probe column on the main canvas so the link to the scope is clear
+      {
+        const pxp = padX + (X_PROBE / BEAT_XMAX) * (W - 2 * padX);
+        ctx.strokeStyle = 'rgba(91,155,213,0.5)'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pxp, 14); ctx.lineTo(pxp, H - 14); ctx.stroke(); ctx.setLineDash([]);
+      }
+
       if (readoutAccum > 0.12) {
         readoutAccum = 0;
         // for the readouts: phase & group velocity (only meaningful when moving)
@@ -372,9 +436,7 @@ function BeatsMode() {
         const vg = Math.abs(dk) > 1e-9 ? dOm / dk : NaN;
         // envelope "now" fraction: the static interference level 2A|cos(δ/2)| when
         // the frequencies are equal, else the breathing temporal-beat envelope
-        const envNow = isMoving ? 1
-          : equal ? Math.abs(Math.cos(0.5 * deltaRef.current))
-            : Math.abs(Math.cos(0.5 * dOm * sim));
+        const envNow = isMoving ? 1 : Math.abs(Math.cos(0.5 * (dPhi + dStatic)));
         setLive({ env: envNow, vp, vg });
       }
 
@@ -521,6 +583,12 @@ function BeatsMode() {
             <div>f_beat = |f₁ − f₂| = {fBeat.toFixed(fBeat < 10 ? 1 : 0)} Hz</div>
             <div className="text-usna-muted">slow-motion view · you'd hear: {hearText}</div>
             {moving && <div className="text-[#5B9BD5]">moving beats · nodes travel at vg</div>}
+          </div>
+        </div>
+        <div ref={scopeWrapRef} className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden relative" style={{ height: 120, background: BG }}>
+          <canvas ref={scopeCanvasRef} className="block" />
+          <div className="absolute top-1.5 left-3 text-xs font-mono text-usna-gold/80 pointer-events-none">
+            Oscilloscope · displacement at the probe vs time (dashed rails = the beat)
           </div>
         </div>
         <InfoPanel {...(moving ? INFO.beatsMoving : INFO.beats)} />
