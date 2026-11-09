@@ -83,7 +83,7 @@ export default function SuperpositionSandbox({ mode = 'beats' }) {
 // the presets (400 & 403, 400 & 600) are literal and the two-oscillator sum below
 // is honest. audioHz is the identity: no transpose is needed in this band.
 const BEAT_FMIN = 200, BEAT_FMAX = 700;
-const BEAT_DEFAULTS = { f1: 300, f2: 303, volume: 0.14, delta: 0 };
+const BEAT_DEFAULTS = { f1: 300, f2: 303, volume: 0.14, delta: 0, visSpeed: 1.0 };
 const audioHz = (f) => f;
 const EPS_EQUAL = 0.5;    // |f1−f2| below this counts as the same frequency
 // A real 400 Hz tone scrolling across the window would be an unwatchable blur, and
@@ -122,6 +122,7 @@ function BeatsMode() {
   const [f2, setF2] = useState(BEAT_DEFAULTS.f2);
   const [delta, setDelta] = useState(BEAT_DEFAULTS.delta); // relative phase (rad), equal-f case
   const [volume, setVolume] = useState(BEAT_DEFAULTS.volume);
+  const [visSpeed, setVisSpeed] = useState(BEAT_DEFAULTS.visSpeed); // slow-motion factor (visual only)
   const [playing, setPlaying] = useState(false);
   const [showComponents, setShowComponents] = useState(true);
   const [moving, setMoving] = useState(false); // "moving beats": detune k too
@@ -133,6 +134,7 @@ function BeatsMode() {
   const f1Ref = useRef(f1); f1Ref.current = f1;
   const f2Ref = useRef(f2); f2Ref.current = f2;
   const deltaRef = useRef(delta); deltaRef.current = delta;
+  const visSpeedRef = useRef(visSpeed); visSpeedRef.current = visSpeed;
   const showRef = useRef(showComponents); showRef.current = showComponents;
   const movingRef = useRef(moving); movingRef.current = moving;
   const volumeRef = useRef(volume); volumeRef.current = volume;
@@ -289,8 +291,11 @@ function BeatsMode() {
       // classic beat: both share k (temporal beats only). moving beat: detune k.
       const kA = kBase;
       const kB = isMoving ? kBase * (1 + K_DETUNE) : kBase;
-      const omA = omega_of(fVisA) * BEAT_SPEED;
-      const omB = omega_of(fVisB) * BEAT_SPEED;
+      // visSpeed scales the whole on-screen motion (carrier and envelope together),
+      // a pure slow-motion knob; the audio is unaffected.
+      const spd = visSpeedRef.current;
+      const omA = omega_of(fVisA) * BEAT_SPEED * spd;
+      const omB = omega_of(fVisB) * BEAT_SPEED * spd;
 
       // relative phase δ drives the equal-frequency sum from double-height to flat
       const phaseB = equal && !isMoving ? deltaRef.current : 0;
@@ -391,7 +396,8 @@ function BeatsMode() {
     else stopAudio();
     setPlaying(false);
     setF1(BEAT_DEFAULTS.f1); setF2(BEAT_DEFAULTS.f2); setDelta(BEAT_DEFAULTS.delta);
-    setVolume(BEAT_DEFAULTS.volume); setShowComponents(true); setMoving(false);
+    setVolume(BEAT_DEFAULTS.volume); setVisSpeed(BEAT_DEFAULTS.visSpeed);
+    setShowComponents(true); setMoving(false);
   };
 
   const beatPeriod = fBeat > 1e-6 ? 1 / fBeat : Infinity;
@@ -469,7 +475,12 @@ function BeatsMode() {
           <Slider label="Volume" value={Number(volume.toFixed(2))} min={0} max={0.6} step={0.01} unit="" onChange={setVolume} />
         </div>
 
-        <div className="border-t border-usna-grid pt-3 space-y-2">
+        <div className="border-t border-usna-grid pt-3">
+          <Slider label="Animation speed" value={Number(visSpeed.toFixed(2))} min={0.15} max={1.5} step={0.05} unit="×" onChange={setVisSpeed} />
+          <p className="text-usna-muted text-xs -mt-2 mb-3 leading-snug">
+            Slow-motion for the picture only; the audio frequencies and beat rate are unchanged.
+          </p>
+          <div className="space-y-2">
           <label className="flex items-center gap-2 text-sm text-usna-text cursor-pointer select-none">
             <input type="checkbox" checked={showComponents} onChange={(e) => setShowComponents(e.target.checked)} className="accent-[#C5B783]" />
             Show component waves
@@ -483,6 +494,7 @@ function BeatsMode() {
               ? 'Δk ≠ 0: beat nodes are spatial and travel at the group velocity vg = Δω/Δk, while the ripple moves at the phase velocity vp = ω̄/k̄.'
               : 'Same k for both waves: the envelope breathes uniformly in time, a temporal beat with no traveling nodes.'}
           </p>
+          </div>
         </div>
 
         <div className="mt-3 border-t border-usna-grid pt-3">
