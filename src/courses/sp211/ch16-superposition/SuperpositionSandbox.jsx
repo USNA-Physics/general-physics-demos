@@ -83,7 +83,7 @@ export default function SuperpositionSandbox({ mode = 'beats' }) {
 // the presets (400 & 403, 400 & 600) are literal and the two-oscillator sum below
 // is honest. audioHz is the identity: no transpose is needed in this band.
 const BEAT_FMIN = 200, BEAT_FMAX = 700;
-const BEAT_DEFAULTS = { f1: 300, f2: 303, volume: 0.14, delta: 0, visSpeed: 1.0 };
+const BEAT_DEFAULTS = { f1: 300, f2: 303, volume: 0.14, delta: 0, visSpeed: 0.5 };
 const audioHz = (f) => f;
 const EPS_EQUAL = 0.5;    // |f1−f2| below this counts as the same frequency
 // A real 400 Hz tone scrolling across the window would be an unwatchable blur, and
@@ -237,11 +237,11 @@ function BeatsMode() {
     // than evaluating ω·t with the absolute clock) keeps the wave continuous when
     // ω changes, so moving a slider no longer snaps the pattern to a new phase.
     let phiA = 0, phiB = 0;
-    // oscilloscope ring buffer: {t, y, e} = time, probe displacement, envelope
+    // oscilloscope: the REAL beat envelope (loudness vs time). Node spacing is the
+    // true beat period 1/Δf, so it tracks Δf and matches what the ear hears (it is
+    // driven by the real frequencies, not the slow-motion caricature).
     let scopeCtx, scopeW, scopeH;
-    const scopeBuf = [];
-    const SCOPE_WIN = 8;                 // seconds of history shown
-    const X_PROBE = BEAT_XMAX * 0.5;     // probe point (centre of the window)
+    const SCOPE_WIN = 4;                 // seconds of the loudness trace shown
 
     const resize = () => {
       W = wrap.clientWidth;
@@ -282,31 +282,35 @@ function BeatsMode() {
       ctx.globalAlpha = 1;
     };
 
-    // oscilloscope: scroll the probe displacement (bold) with its envelope rails
-    // (faint, dashed) — the rails trace a slow wave at exactly the beat frequency.
-    const drawScope = (maxAmp) => {
+    // oscilloscope: the loudness envelope of the two REAL tones versus time,
+    // 2A|cos(πΔf·t)|, drawn analytically per pixel (so it never aliases) and
+    // scrolling with the clock. The band pinches to zero at every beat node, one
+    // every 1/Δf seconds, so widening Δf visibly packs the throbs closer together.
+    // Equal frequencies give a steady band at the interference level 2A|cos(δ/2)|.
+    const drawScope = (df, dlt, eq, nowT) => {
       scopeCtx.clearRect(0, 0, scopeW, scopeH);
       scopeCtx.fillStyle = BG; scopeCtx.fillRect(0, 0, scopeW, scopeH);
       scopeCtx.strokeStyle = GRID; scopeCtx.lineWidth = 1;
       scopeCtx.beginPath(); scopeCtx.moveTo(0, scopeH / 2); scopeCtx.lineTo(scopeW, scopeH / 2); scopeCtx.stroke();
-      if (scopeBuf.length >= 2 && maxAmp > 0) {
-        const t1 = scopeBuf[scopeBuf.length - 1].t, t0 = t1 - SCOPE_WIN, amp = scopeH * 0.42;
-        const X = (t) => ((t - t0) / SCOPE_WIN) * scopeW;
-        const Y = (v) => scopeH / 2 - (v / maxAmp) * amp;
-        scopeCtx.strokeStyle = 'rgba(197,183,131,0.4)'; scopeCtx.lineWidth = 1.2; scopeCtx.setLineDash([4, 4]);
-        [1, -1].forEach((s) => {
-          scopeCtx.beginPath();
-          scopeBuf.forEach((p, i) => { const x = X(p.t), y = Y(s * p.e); i ? scopeCtx.lineTo(x, y) : scopeCtx.moveTo(x, y); });
-          scopeCtx.stroke();
-        });
-        scopeCtx.setLineDash([]);
-        scopeCtx.strokeStyle = GOLD; scopeCtx.lineWidth = 1.8;
+      const amp = scopeH * 0.42;
+      const envAt = (t) => (eq ? Math.abs(Math.cos(0.5 * dlt)) : Math.abs(Math.cos(Math.PI * df * t)));
+      const tAt = (x) => nowT - SCOPE_WIN * (1 - x / scopeW);
+      // filled band between the ±envelope rails
+      scopeCtx.beginPath();
+      for (let x = 0; x <= scopeW; x += 2) { const y = scopeH / 2 - envAt(tAt(x)) * amp; x === 0 ? scopeCtx.moveTo(x, y) : scopeCtx.lineTo(x, y); }
+      for (let x = scopeW; x >= 0; x -= 2) { const y = scopeH / 2 + envAt(tAt(x)) * amp; scopeCtx.lineTo(x, y); }
+      scopeCtx.closePath();
+      scopeCtx.fillStyle = 'rgba(197,183,131,0.18)'; scopeCtx.fill();
+      // the two rails, bold gold
+      scopeCtx.strokeStyle = GOLD; scopeCtx.lineWidth = 1.8;
+      [1, -1].forEach((s) => {
         scopeCtx.beginPath();
-        scopeBuf.forEach((p, i) => { const x = X(p.t), y = Y(p.y); i ? scopeCtx.lineTo(x, y) : scopeCtx.moveTo(x, y); });
+        for (let x = 0; x <= scopeW; x += 2) { const y = scopeH / 2 - s * envAt(tAt(x)) * amp; x === 0 ? scopeCtx.moveTo(x, y) : scopeCtx.lineTo(x, y); }
         scopeCtx.stroke();
-      }
+      });
       scopeCtx.fillStyle = MUTED; scopeCtx.font = '10px ui-monospace, monospace';
-      scopeCtx.textAlign = 'right'; scopeCtx.fillText(`${SCOPE_WIN}s window →  now`, scopeW - 6, scopeH - 6);
+      scopeCtx.textAlign = 'right';
+      scopeCtx.fillText(eq ? 'steady — no beat' : `beat period 1/Δf = ${(1 / df).toFixed(2)} s`, scopeW - 6, scopeH - 6);
       scopeCtx.textAlign = 'left';
     };
 
@@ -412,20 +416,8 @@ function BeatsMode() {
       drawTrace(ySum, GOLD, 2.8, 1);
       ctx.shadowBlur = 0;
 
-      // ── oscilloscope: record the displacement at the probe column vs time ──────
-      const probeIdx = Math.min(xs.length - 1, Math.round((X_PROBE / BEAT_XMAX) * (xs.length - 1)));
-      const envProbe = isMoving
-        ? Math.abs(2 * ampPx * Math.cos(0.5 * dk * X_PROBE - 0.5 * dPhi))
-        : Math.abs(2 * ampPx * Math.cos(0.5 * (dPhi + dStatic)));
-      scopeBuf.push({ t: sim, y: ySum[probeIdx], e: envProbe });
-      while (scopeBuf.length && scopeBuf[0].t < sim - SCOPE_WIN) scopeBuf.shift();
-      if (scopeCtx) drawScope(2 * ampPx);
-      // mark the probe column on the main canvas so the link to the scope is clear
-      {
-        const pxp = padX + (X_PROBE / BEAT_XMAX) * (W - 2 * padX);
-        ctx.strokeStyle = 'rgba(91,155,213,0.5)'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(pxp, 14); ctx.lineTo(pxp, H - 14); ctx.stroke(); ctx.setLineDash([]);
-      }
+      // ── oscilloscope: the real-time loudness envelope of the two true tones ────
+      if (scopeCtx) drawScope(Math.abs(fA - fB), deltaRef.current, equal, sim);
 
       if (readoutAccum > 0.12) {
         readoutAccum = 0;
@@ -588,7 +580,7 @@ function BeatsMode() {
         <div ref={scopeWrapRef} className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden relative" style={{ height: 120, background: BG }}>
           <canvas ref={scopeCanvasRef} className="block" />
           <div className="absolute top-1.5 left-3 text-xs font-mono text-usna-gold/80 pointer-events-none">
-            Oscilloscope · displacement at the probe vs time (dashed rails = the beat)
+            Beat envelope · loudness of the two tones vs time (real-time, matches the audio)
           </div>
         </div>
         <InfoPanel {...(moving ? INFO.beatsMoving : INFO.beats)} />
