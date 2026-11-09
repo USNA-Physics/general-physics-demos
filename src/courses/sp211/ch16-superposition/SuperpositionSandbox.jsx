@@ -79,22 +79,34 @@ export default function SuperpositionSandbox({ mode = 'beats' }) {
 // BEATS (L40)
 // ════════════════════════════════════════════════════════════════════════════
 
-// Low display frequencies so the ripple crosses the window at a calm, watchable
-// pace, and f₁ ≠ f₂ (but close) so a slow beat is showing on load.
-const BEAT_DEFAULTS = { f1: 0.75, f2: 0.85, volume: 0.12 };
-// The slider frequencies (Hz) are low so the beat is watchable on-screen. For
-// the *ear* we transpose both up by this factor into the audible band; the beat
-// frequency |f1−f2| is preserved because the transpose is a common multiplier.
-// Audio: both tones sit near a fixed base pitch, each nudged up by its own display
-// frequency, so the two oscillators differ by exactly |f1−f2| Hz and beat at that
-// rate — the audible wah you hear matches the beat you see and the readout. (A
-// multiplicative transpose would scale the beat too, turning a 1 Hz beat into a
-// 260 Hz interval that does not beat at all.)
-const AUDIO_BASE = 300;   // Hz — the reference tone the two frequencies sit near
-const audioHz = (f) => AUDIO_BASE + f;
+// The sliders are REAL audio frequencies (Hz) in a comfortable listening band, so
+// the presets (400 & 403, 400 & 600) are literal and the two-oscillator sum below
+// is honest. audioHz is the identity: no transpose is needed in this band.
+const BEAT_FMIN = 200, BEAT_FMAX = 700;
+const BEAT_DEFAULTS = { f1: 300, f2: 303, volume: 0.14, delta: 0 };
+const audioHz = (f) => f;
+const EPS_EQUAL = 0.5;    // |f1−f2| below this counts as the same frequency
+// A real 400 Hz tone scrolling across the window would be an unwatchable blur, and
+// a slow beat riding on it would be invisible (the carrier/beat ratio is ~130). So
+// the CANVAS is a slow-motion caricature: the carrier is pinned to a fixed watchable
+// rate and the detune is exaggerated (tanh) so the beat stays visible, while the
+// AUDIO plays the true tones. The eye reads the structure; the ear judges the pitch.
+const VIS_CARRIER = 0.9;       // Hz — on-screen average ripple rate (held fixed)
+const VIS_DETUNE_GAIN = 40;    // exaggerates the relative detune for the eye
+const toVisFreqs = (f1, f2) => {
+  const fbar = 0.5 * (f1 + f2) || 1;
+  const half = 0.5 * VIS_CARRIER * Math.tanh((VIS_DETUNE_GAIN * (f2 - f1)) / fbar);
+  return [VIS_CARRIER - half, VIS_CARRIER + half];
+};
+const BEAT_PRESETS = [
+  { key: 'reinforce', label: '(a) Equal, in step', f1: 400, f2: 400, delta: 0 },
+  { key: 'cancel', label: '(b) Equal, ½λ apart', f1: 400, f2: 400, delta: Math.PI },
+  { key: 'throb', label: '(c) 400 & 403 (throb)', f1: 400, f2: 403, delta: 0 },
+  { key: 'chord', label: '(d) 400 & 600 (two tones)', f1: 400, f2: 600, delta: 0 },
+];
 const BEAT_XMAX = 12;     // metres of string shown
 const BEAT_SAMPLES = 600;
-const BEAT_SPEED = 1.0;   // wave phase speed used to turn f into ω on-screen
+const BEAT_SPEED = 1.0;   // wave phase speed used to turn the visual f into ω on-screen
 // Base spatial wavelength (m) used for both components in the classic (equal-k)
 // beat. λ = BEAT_XMAX/3 → three ripples across the window.
 const BEAT_LAMBDA = BEAT_XMAX / 3;
@@ -108,6 +120,7 @@ function BeatsMode() {
 
   const [f1, setF1] = useState(BEAT_DEFAULTS.f1);
   const [f2, setF2] = useState(BEAT_DEFAULTS.f2);
+  const [delta, setDelta] = useState(BEAT_DEFAULTS.delta); // relative phase (rad), equal-f case
   const [volume, setVolume] = useState(BEAT_DEFAULTS.volume);
   const [playing, setPlaying] = useState(false);
   const [showComponents, setShowComponents] = useState(true);
@@ -119,25 +132,34 @@ function BeatsMode() {
   // refs the animation + audio read every frame (no re-subscribe on change)
   const f1Ref = useRef(f1); f1Ref.current = f1;
   const f2Ref = useRef(f2); f2Ref.current = f2;
+  const deltaRef = useRef(delta); deltaRef.current = delta;
   const showRef = useRef(showComponents); showRef.current = showComponents;
   const movingRef = useRef(moving); movingRef.current = moving;
-  const playingRef = useRef(playing); playingRef.current = playing;
   const volumeRef = useRef(volume); volumeRef.current = volume;
 
   const fBeat = beatFreq(f1, f2);
 
-  // ── Web Audio ─────────────────────────────────────────────────────────────
-  // Two nearby tones beating is exactly one carrier at the average pitch,
-  // amplitude-modulated by the beat envelope. We synthesize it that way: a single
-  // oscillator whose GAIN is driven every frame by the SAME envelope the canvas
-  // draws (from the shared sim clock), so the audible wah is phase-locked to the
-  // picture — loud when the waves add, silent at the nodes.
-  const audioRef = useRef({ ctx: null, osc1: null, gain: null });
+  // ── Web Audio: an honest two-oscillator sum ───────────────────────────────
+  // Two real sine oscillators at f₁ and f₂, each through its own gain into a master
+  // gain. The beat, the interference, and the chord all EMERGE from the real sum,
+  // so there is no faked envelope and no spurious sidebands. A DelayNode on the
+  // second branch imposes the relative phase δ for the equal-frequency case: a
+  // delay of δ/(2πf) seconds, so δ = π is half a period and the tones cancel.
+  const audioRef = useRef({ ctx: null, osc1: null, osc2: null, g1: null, g2: null, delay: null, master: null });
 
-  const stopAudio = () => {
+  // seconds of delay that realise phase δ at frequency f (equal-frequency case only)
+  const phaseDelaySeconds = (fa, fb, d) => {
+    if (Math.abs(fa - fb) >= EPS_EQUAL || fa <= 0) return 0;  // phase drifts on its own
+    const dd = (((d % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI));
+    return dd / (2 * Math.PI * fa);
+  };
+
+  const stopAudio = (when) => {
     const a = audioRef.current;
-    try { a.osc1 && a.osc1.stop(); } catch (e) { /* already stopped */ }
-    a.osc1 = null;
+    const t = when != null ? when : (a.ctx ? a.ctx.currentTime : 0);
+    try { a.osc1 && a.osc1.stop(t); } catch (e) { /* already stopped */ }
+    try { a.osc2 && a.osc2.stop(t); } catch (e) { /* already stopped */ }
+    a.osc1 = a.osc2 = null;
   };
 
   const startAudio = () => {
@@ -147,35 +169,48 @@ function BeatsMode() {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
       a.ctx = new AC();
-      a.gain = a.ctx.createGain();
-      a.gain.connect(a.ctx.destination);
+      a.master = a.ctx.createGain();
+      a.master.gain.value = 0;
+      a.master.connect(a.ctx.destination);
     }
     if (a.ctx.state === 'suspended') a.ctx.resume();
-    a.gain.gain.setValueAtTime(0, a.ctx.currentTime); // the rAF loop drives the gain
-    const o = a.ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(audioHz(0.5 * (f1Ref.current + f2Ref.current)), a.ctx.currentTime);
-    o.connect(a.gain);
-    o.start();
-    a.osc1 = o;
+    const t = a.ctx.currentTime;
+    const o1 = a.ctx.createOscillator(), o2 = a.ctx.createOscillator();
+    const g1 = a.ctx.createGain(), g2 = a.ctx.createGain();
+    const delay = a.ctx.createDelay(0.05);
+    o1.type = o2.type = 'sine';
+    o1.frequency.setValueAtTime(audioHz(f1Ref.current), t);
+    o2.frequency.setValueAtTime(audioHz(f2Ref.current), t);
+    g1.gain.value = 0.5; g2.gain.value = 0.5;  // in step → amplitude 1.0 (louder than one)
+    delay.delayTime.setValueAtTime(phaseDelaySeconds(f1Ref.current, f2Ref.current, deltaRef.current), t);
+    o1.connect(g1).connect(a.master);
+    o2.connect(delay).connect(g2).connect(a.master);
+    o1.start(); o2.start();
+    a.osc1 = o1; a.osc2 = o2; a.g1 = g1; a.g2 = g2; a.delay = delay;
+    a.master.gain.setTargetAtTime(volumeRef.current, t, 0.02);  // soft fade-in, no click
   };
 
   const toggleAudio = () => {
-    if (playing) { stopAudio(); setPlaying(false); }
-    else { startAudio(); setPlaying(true); }
+    const a = audioRef.current;
+    if (playing) {
+      // ramp the master down, then stop the oscillators a hair later (no click)
+      if (a.ctx && a.master) { a.master.gain.setTargetAtTime(0, a.ctx.currentTime, 0.02); stopAudio(a.ctx.currentTime + 0.08); }
+      else stopAudio();
+      setPlaying(false);
+    } else { startAudio(); setPlaying(true); }
   };
 
-  // keep the carrier at the average of the two frequencies
+  // keep oscillator frequencies, the phase delay, and the volume in sync with the
+  // controls, all with short ramps so slider drags stay click-free
   useEffect(() => {
     const a = audioRef.current;
-    if (!playing || !a.ctx || !a.osc1) return;
-    a.osc1.frequency.setTargetAtTime(audioHz(0.5 * (f1 + f2)), a.ctx.currentTime, 0.02);
-  }, [f1, f2, playing]);
-
-  useEffect(() => {
-    const a = audioRef.current;
-    if (a.ctx && a.gain && !playingRef.current) a.gain.gain.setTargetAtTime(0, a.ctx.currentTime, 0.02);
-  }, [volume]);
+    if (!playing || !a.ctx || !a.osc1 || !a.osc2) return;
+    const t = a.ctx.currentTime;
+    a.osc1.frequency.setTargetAtTime(audioHz(f1), t, 0.02);
+    a.osc2.frequency.setTargetAtTime(audioHz(f2), t, 0.02);
+    a.delay.delayTime.setTargetAtTime(phaseDelaySeconds(f1, f2, delta), t, 0.02);
+    a.master.gain.setTargetAtTime(volume, t, 0.02);
+  }, [f1, f2, delta, volume, playing]);
 
   // stop + close audio on unmount
   useEffect(() => () => {
@@ -243,17 +278,24 @@ function BeatsMode() {
       const fA = f1Ref.current;
       const fB = f2Ref.current;
       const isMoving = movingRef.current;
+      const equal = Math.abs(fA - fB) < EPS_EQUAL;
       const ampPx = Math.min(H * 0.2, 70);
+
+      // slow-motion caricature: fixed watchable carrier, exaggerated detune (audio
+      // plays the true tones separately).
+      const [fVisA, fVisB] = toVisFreqs(fA, fB);
 
       const kBase = k_of(BEAT_LAMBDA);
       // classic beat: both share k (temporal beats only). moving beat: detune k.
       const kA = kBase;
       const kB = isMoving ? kBase * (1 + K_DETUNE) : kBase;
-      const omA = omega_of(fA) * BEAT_SPEED;
-      const omB = omega_of(fB) * BEAT_SPEED;
+      const omA = omega_of(fVisA) * BEAT_SPEED;
+      const omB = omega_of(fVisB) * BEAT_SPEED;
 
+      // relative phase δ drives the equal-frequency sum from double-height to flat
+      const phaseB = equal && !isMoving ? deltaRef.current : 0;
       const wA = { A: ampPx, k: kA, omega: omA, phase: 0 };
-      const wB = { A: ampPx, k: kB, omega: omB, phase: 0 };
+      const wB = { A: ampPx, k: kB, omega: omB, phase: phaseB };
 
       ctx.clearRect(0, 0, W, H);
 
@@ -280,17 +322,6 @@ function BeatsMode() {
       const dk = kA - kB;
       const dOm = omA - omB;
 
-      // sonify the beat: drive the carrier's gain with the SAME temporal envelope
-      // we draw, so the audible wah is loud when the waves add and silent at the
-      // nodes, phase-locked to the picture (fixes the audio/visual drift).
-      {
-        const a = audioRef.current;
-        if (a.ctx && a.gain) {
-          const envNorm = Math.abs(Math.cos(0.5 * dOm * sim));
-          const g = playingRef.current ? volumeRef.current * envNorm : 0;
-          a.gain.gain.setTargetAtTime(g, a.ctx.currentTime, 0.02);
-        }
-      }
       if (isMoving && Math.abs(dk) > 1e-9) {
         const envFn = (s) => (x) =>
           s * 2 * ampPx * Math.abs(Math.cos(0.5 * dk * x - 0.5 * dOm * sim));
@@ -307,8 +338,10 @@ function BeatsMode() {
           ctx.beginPath(); ctx.arc(px, H / 2, 3, 0, 2 * Math.PI); ctx.fill();
         }
       } else {
-        // classic temporal envelope: flat rails that breathe up/down in time
-        const envAmp = Math.abs(2 * ampPx * Math.cos(0.5 * dOm * sim));
+        // classic temporal envelope: flat rails that breathe up/down in time. The
+        // phase term folds in δ for the equal-frequency case, so the rails collapse
+        // to zero at δ = π (the sum is flat and the tones cancel).
+        const envAmp = Math.abs(2 * ampPx * Math.cos(0.5 * (dOm * sim + phaseB)));
         ctx.strokeStyle = 'rgba(197,183,131,0.28)';
         ctx.lineWidth = 1; ctx.setLineDash([5, 6]);
         [1, -1].forEach((s) => {
@@ -332,8 +365,11 @@ function BeatsMode() {
         const ombar = 0.5 * (omA + omB);
         const vp = kbar !== 0 ? ombar / kbar : 0;
         const vg = Math.abs(dk) > 1e-9 ? dOm / dk : NaN;
-        // a representative envelope "now" fraction for the classic case
-        const envNow = isMoving ? 1 : Math.abs(Math.cos(0.5 * dOm * sim));
+        // envelope "now" fraction: the static interference level 2A|cos(δ/2)| when
+        // the frequencies are equal, else the breathing temporal-beat envelope
+        const envNow = isMoving ? 1
+          : equal ? Math.abs(Math.cos(0.5 * deltaRef.current))
+            : Math.abs(Math.cos(0.5 * dOm * sim));
         setLive({ env: envNow, vp, vg });
       }
 
@@ -347,27 +383,75 @@ function BeatsMode() {
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
+  const applyPreset = (p) => { setF1(p.f1); setF2(p.f2); setDelta(p.delta); };
+
   const reset = () => {
-    stopAudio(); setPlaying(false);
-    setF1(BEAT_DEFAULTS.f1); setF2(BEAT_DEFAULTS.f2);
+    const a = audioRef.current;
+    if (a.ctx && a.master) { a.master.gain.setTargetAtTime(0, a.ctx.currentTime, 0.02); stopAudio(a.ctx.currentTime + 0.08); }
+    else stopAudio();
+    setPlaying(false);
+    setF1(BEAT_DEFAULTS.f1); setF2(BEAT_DEFAULTS.f2); setDelta(BEAT_DEFAULTS.delta);
     setVolume(BEAT_DEFAULTS.volume); setShowComponents(true); setMoving(false);
   };
 
   const beatPeriod = fBeat > 1e-6 ? 1 / fBeat : Infinity;
+  const gap = Math.abs(f1 - f2);
+  const isEqual = gap < EPS_EQUAL;
+  const pathFrac = (((delta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI); // Δx/λ ∈ [0,1)
+  // one-line "what you'd hear", from the same numbers that drive the audio
+  const hearText = isEqual
+    ? (Math.abs(Math.cos(delta / 2)) > 0.92 ? 'louder (reinforcing)'
+      : Math.abs(Math.cos(delta / 2)) < 0.08 ? 'silent (cancelling)'
+        : 'partly cancelling')
+    : gap < 15 ? `throb ${gap.toFixed(gap < 1 ? 1 : 0)} per second`
+      : 'two separate tones (a chord)';
 
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <ControlPanel onReset={reset}>
-        <Slider label="Frequency f₁" value={Number(f1.toFixed(2))} min={0.5} max={1.5} step={0.05} unit="Hz" onChange={setF1} />
-        <Slider label="Frequency f₂" value={Number(f2.toFixed(2))} min={0.5} max={1.5} step={0.05} unit="Hz" onChange={setF2} />
+        <Slider label="Frequency f₁" value={Math.round(f1)} min={BEAT_FMIN} max={BEAT_FMAX} step={1} unit="Hz" onChange={setF1} />
+        <Slider label="Frequency f₂" value={Math.round(f2)} min={BEAT_FMIN} max={BEAT_FMAX} step={1} unit="Hz" onChange={setF2} />
 
-        <div className="mb-4">
+        <div className="mb-3">
+          <div className="text-usna-text text-sm font-medium mb-2">Presets (predict, then listen)</div>
+          <div className="grid grid-cols-1 gap-1.5">
+            {BEAT_PRESETS.map((p) => {
+              const active = f1 === p.f1 && f2 === p.f2 && (p.f1 !== p.f2 || Math.abs(delta - p.delta) < 1e-3);
+              return (
+                <button
+                  key={p.key}
+                  onClick={() => applyPreset(p)}
+                  className={`px-3 py-1.5 rounded text-sm text-left border transition-colors ${
+                    active ? 'bg-usna-gold text-usna-navy border-usna-gold'
+                      : 'bg-usna-deep text-usna-text border-usna-grid hover:border-usna-gold hover:text-usna-gold'
+                  }`}
+                >{p.label}</button>
+              );
+            })}
+          </div>
           <button
             onClick={() => setF2(f1)}
-            className="w-full px-3 py-1.5 rounded text-sm border border-usna-grid bg-usna-deep text-usna-text hover:border-usna-gold hover:text-usna-gold transition-colors"
+            className="w-full mt-1.5 px-3 py-1.5 rounded text-xs border border-usna-grid bg-usna-deep text-usna-muted hover:border-usna-gold hover:text-usna-gold transition-colors"
           >
-            Match f₂ = f₁ (then detune)
+            Match f₂ = f₁ (then detune by hand)
           </button>
+        </div>
+
+        {/* relative phase: a real, meaningful control only when f₁ = f₂ */}
+        <div className="border-t border-usna-grid pt-3">
+          {isEqual && !moving ? (
+            <>
+              <Slider label="Relative phase δ" value={Number(delta.toFixed(2))} min={0} max={2 * Math.PI} step={0.05} unit="rad" onChange={setDelta} />
+              <Readout label="Path difference Δx/λ" value={pathFrac.toFixed(2)} unit="λ" />
+              <p className="text-usna-muted text-xs mt-1 leading-snug">
+                δ = π is a half-wavelength path difference: the two tones arrive antiphase and cancel to silence.
+              </p>
+            </>
+          ) : (
+            <p className="text-usna-muted text-xs leading-snug">
+              Relative phase applies when f₁ = f₂. With unequal frequencies the phase drifts on its own, which is the beat.
+            </p>
+          )}
         </div>
 
         <div className="border-t border-usna-grid pt-3">
@@ -378,9 +462,9 @@ function BeatsMode() {
                 playing ? 'bg-usna-gold text-usna-navy' : 'bg-usna-deep text-usna-text border border-usna-grid hover:border-usna-gold hover:text-usna-gold'
               }`}
             >
-              {playing ? '❚❚ Mute' : '🔊 Play beats'}
+              {playing ? '❚❚ Mute' : '🔊 Play tones'}
             </button>
-            <span className="text-usna-muted text-xs">hear the wah-wah</span>
+            <span className="text-usna-gold text-xs font-mono">you'd hear: {hearText}</span>
           </div>
           <Slider label="Volume" value={Number(volume.toFixed(2))} min={0} max={0.6} step={0.01} unit="" onChange={setVolume} />
         </div>
@@ -402,17 +486,18 @@ function BeatsMode() {
         </div>
 
         <div className="mt-3 border-t border-usna-grid pt-3">
-          <Readout label="Beat frequency" value={fBeat.toFixed(2)} unit="Hz" />
+          <Readout label="Beat frequency" value={fBeat.toFixed(fBeat < 10 ? 1 : 0)} unit="Hz" />
           <Readout label="Beat period" value={isFinite(beatPeriod) ? beatPeriod.toFixed(2) : '∞'} unit="s" />
-          {!moving && <Readout label="Envelope now" value={(live.env * 100).toFixed(0)} unit="%" />}
+          {!moving && isEqual && <Readout label="Interference level" value={(live.env * 100).toFixed(0)} unit="%" />}
+          {!moving && !isEqual && <Readout label="Envelope now" value={(live.env * 100).toFixed(0)} unit="%" />}
           {moving && (
             <>
               <Readout label="Phase velocity vp" value={live.vp.toFixed(1)} unit="m/s" />
               <Readout label="Group velocity vg" value={isFinite(live.vg) ? live.vg.toFixed(1) : '—'} unit="m/s" />
             </>
           )}
-          <Readout label="Audible tone f₁" value={audioHz(f1).toFixed(2)} unit="Hz" />
-          <Readout label="Audible tone f₂" value={audioHz(f2).toFixed(2)} unit="Hz" />
+          <Readout label="Tone f₁" value={Math.round(f1)} unit="Hz" />
+          <Readout label="Tone f₂" value={Math.round(f2)} unit="Hz" />
         </div>
       </ControlPanel>
 
@@ -420,8 +505,9 @@ function BeatsMode() {
         <div ref={wrapRef} className="bg-usna-card border border-usna-grid rounded-lg min-w-0 overflow-hidden relative" style={{ height: 420, background: BG }}>
           <canvas ref={canvasRef} className="block" />
           <div className="absolute top-2 left-3 text-xs font-mono text-usna-gold/90 space-y-0.5 pointer-events-none">
-            <div>f₁ = {f1.toFixed(2)} Hz&nbsp;&nbsp;f₂ = {f2.toFixed(2)} Hz</div>
-            <div>f_beat = |f₁ − f₂| = {fBeat.toFixed(2)} Hz</div>
+            <div>f₁ = {Math.round(f1)} Hz&nbsp;&nbsp;f₂ = {Math.round(f2)} Hz</div>
+            <div>f_beat = |f₁ − f₂| = {fBeat.toFixed(fBeat < 10 ? 1 : 0)} Hz</div>
+            <div className="text-usna-muted">slow-motion view · you'd hear: {hearText}</div>
             {moving && <div className="text-[#5B9BD5]">moving beats · nodes travel at vg</div>}
           </div>
         </div>
@@ -955,10 +1041,10 @@ function StandingMode() {
 // ════════════════════════════════════════════════════════════════════════════
 const INFO = {
   beats: {
-    title: 'Beats: the sum has a slow pulse',
+    title: 'Beats: superposition you can hear',
     description:
-      'Add two traveling waves whose frequencies are almost equal and the sum acquires a slowly breathing amplitude envelope. Where the two waves are momentarily in phase the sum is loud; a moment later they drift out of phase and cancel. That loud-soft-loud cycle repeats at the beat frequency f_beat = |f₁ − f₂|, which you read right off the screen and hear as the wah-wah in the audio. Because both components here share the same wavenumber k, the envelope has no spatial structure: it breathes uniformly in time (a purely temporal beat). Set f₂ = f₁ for one steady tone with no envelope, then detune by a hair and watch the pulse crawl into existence, and flip on "moving beats" to give the components different k and make the beat nodes travel.',
-    equation: String.raw`\sin(\omega_1 t) + \sin(\omega_2 t) = 2\cos\!\Big(\tfrac{\omega_1-\omega_2}{2}t\Big)\sin\!\Big(\tfrac{\omega_1+\omega_2}{2}t\Big),\quad f_{\text{beat}} = |f_1 - f_2|`,
+      'The output is the literal sum of two tones, y = y₁ + y₂, played by two real oscillators. With equal frequencies the result depends only on the relative phase δ: in step the tones reinforce to twice the amplitude, and a half-wavelength path difference (δ = π) makes them arrive antiphase and cancel to silence. Detune them slightly and the two tones drift in and out of phase on their own, so the amplitude breathes at the beat frequency f_beat = |f₁ − f₂|, heard as a throb. Widen the gap and the throb outruns the ear, which then stops hearing one pulsing tone and hears two separate pitches. Beats are the small-gap limit of a chord; the operation is the same sum throughout. The canvas is drawn in slow motion with the pitch difference exaggerated so the waveform stays visible, while the audio plays the true frequencies. Flip on "moving beats" to give the components different wavenumbers and make the beat nodes travel.',
+    equation: String.raw`y = y_1 + y_2,\qquad \text{equal } f:\ 2A\cos\tfrac{\delta}{2},\qquad f_{\text{beat}} = |f_1 - f_2|`,
   },
   beatsMoving: {
     title: 'Moving beats: group velocity vs phase velocity',
