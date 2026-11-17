@@ -457,6 +457,20 @@ const courses = [
             component: lazy(() => import('./courses/sp211/ch15-waves/TravelingWave')),
           },
           {
+            slug: 'coupled-oscillators',
+            dLabel: 'D37b',
+            title: 'Coupled Oscillators → the Continuum String',
+            description: 'A string is a chain of coupled SHM oscillators: each bead is pulled back by the tension in its two neighbor segments. Start with one bead (the L35 oscillator), add more and normal modes beat, then take N → ∞ and the wave equation emerges with nothing new but Newton\'s second law. Modes: beads on a string, normal modes & dispersion, and the N → ∞ limit where a lumpy dispersing pulse locks into a clean wave at v = √(F_T/μ).',
+            moment: 'Drag N upward: at N=1 the bead is the L35 oscillator; by N≈20 a pluck propagates and holds its shape, and the discrete dispersion curve straightens into ω = vk — the wave equation is just Newton on many coupled oscillators.',
+            status: 'built',
+            modes: [
+              { slug: 'chain', label: 'Beads on a string' },
+              { slug: 'modes', label: 'Normal modes & dispersion' },
+              { slug: 'continuum', label: 'Take N → ∞' },
+            ],
+            component: lazy(() => import('./courses/sp211/ch15-waves/CoupledOscillators')),
+          },
+          {
             slug: 'doppler',
             dLabel: 'D39',
             title: 'Doppler Wavefront Visualizer',
