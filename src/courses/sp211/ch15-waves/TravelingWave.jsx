@@ -66,14 +66,19 @@ export default function TravelingWave({ mode = 'transverse' }) {
  *  TRANSVERSE (L37)                                                           *
  * ========================================================================== */
 
-const TX_DEFAULTS = { A: 0.4, lambda: 2.0, freq: 0.8, tension: 40, mu: 4 };
+// Tension/μ are framed as a heavy rope (μ in kg/m, F_T a few N) so that
+// v = √(F_T/μ) lands in the same ~0.1–8 m/s band as the f·λ pair instead of
+// the hundreds-of-m/s a light string would give. Default √(10/4) = 1.58 m/s
+// matches the f·λ default of 0.8·2.0 = 1.6 m/s, so the two drive modes animate
+// at the same watchable pace.
+const TX_DEFAULTS = { A: 0.4, lambda: 2.0, freq: 0.8, tension: 10, mu: 4 };
 
 function Transverse() {
   const [A, setA] = useState(TX_DEFAULTS.A);           // m
   const [lambda, setLambda] = useState(TX_DEFAULTS.lambda); // m
   const [freq, setFreq] = useState(TX_DEFAULTS.freq);  // Hz (physics)
   const [tension, setTension] = useState(TX_DEFAULTS.tension); // N
-  const [mu, setMu] = useState(TX_DEFAULTS.mu);        // g/m entered; kg/m internal
+  const [mu, setMu] = useState(TX_DEFAULTS.mu);        // kg/m (heavy rope)
   const [driveBy, setDriveBy] = useState('fλ');        // 'fλ' or 'string' (v = √(F_T/μ))
   const [paused, setPaused] = useState(false);
   const [showParticles, setShowParticles] = useState(true);
@@ -91,8 +96,9 @@ function Transverse() {
     setSelected(null);
   };
 
-  // μ slider is in g/m for a friendly range; convert to kg/m for physics.
-  const muSI = mu / 1000;
+  // μ slider is already in SI (kg/m) — a heavy rope keeps v in a slow,
+  // watchable band without sub-Newton tensions.
+  const muSI = mu;
   // Wave speed & derived quantities depend on which pair the user is driving.
   const vString = waveSpeed(tension, muSI);      // √(F_T/μ)
   const v = driveBy === 'string' ? vString : freq * lambda;
@@ -378,8 +384,8 @@ function Transverse() {
           <Slider label="Frequency (f)" value={freq} min={0.2} max={2} step={0.05} unit="Hz" onChange={setFreq} />
         ) : (
           <>
-            <Slider label="Tension (F_T)" value={tension} min={5} max={120} step={1} unit="N" onChange={setTension} />
-            <Slider label="Linear density (μ)" value={mu} min={1} max={20} step={0.5} unit="g/m" onChange={setMu} />
+            <Slider label="Tension (F_T)" value={tension} min={2} max={40} step={1} unit="N" onChange={setTension} />
+            <Slider label="Linear density (μ)" value={mu} min={1} max={10} step={0.5} unit="kg/m" onChange={setMu} />
           </>
         )}
 
